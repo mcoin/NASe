@@ -41,6 +41,15 @@ if [[ ! -d "$source_path" ]]; then
     exit 0
 fi
 
+# Ensure source is not on the root filesystem — if the source drive is
+# unmounted but its directory exists, rsync with --delete would wipe the backup.
+root_dev=$(findmnt --target / --output SOURCE --noheadings --first-only)
+source_dev=$(findmnt --target "$source_path" --output SOURCE --noheadings --first-only)
+if [[ "$source_dev" == "$root_dev" ]]; then
+    log_info "Sync job '${JOB_NAME}': source '${source_path}' is on the root filesystem — drive not mounted, skipping."
+    exit 0
+fi
+
 dest_parent=$(dirname "$dest_path")
 if [[ ! -d "$dest_parent" ]]; then
     log_info "Sync job '${JOB_NAME}': destination '${dest_parent}' not available — skipping."
