@@ -38,6 +38,7 @@ drives:
     filesystem: ext4
     spindown_min: 60
     smart_check: true
+    owner: root
 
 # --------------------------------------------------------------------------
 # Samba
