@@ -119,7 +119,7 @@ services:
     # Directory exposed as the root of the file browser
     root: /mnt/primary
     # Login username (password set via FILEBROWSER_PASSWORD in .env)
-    username: nasuser
+    username: nase
     # Base URL path if served behind a reverse proxy (e.g. "/files").
     # Leave empty for direct access.
     base_url: ""
