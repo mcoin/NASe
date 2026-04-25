@@ -29,26 +29,37 @@ fb_password="${FILEBROWSER_PASSWORD:-}"
 install_filebrowser() {
     local arch
     arch=$(dpkg --print-architecture)
-    local asset
+    local arch_pattern
     case "$arch" in
-        arm64) asset="linux-arm64" ;;
-        armhf) asset="linux-armv7" ;;
-        amd64) asset="linux-amd64" ;;
+        arm64) arch_pattern="linux.*arm64" ;;
+        armhf) arch_pattern="linux.*armv7" ;;
+        amd64) arch_pattern="linux.*amd64" ;;
         *)     die "Unsupported architecture: ${arch}" ;;
     esac
 
     log_info "Fetching latest filebrowser release info..."
-    local latest_version
-    latest_version=$(curl -fsSL https://api.github.com/repos/filebrowser/filebrowser/releases/latest \
-        | grep '"tag_name"' | sed 's/.*"v\([^"]*\)".*/\1/')
-    [[ -n "$latest_version" ]] || die "Could not determine latest filebrowser version from GitHub API."
+    local release_json
+    release_json=$(curl -fsSL https://api.github.com/repos/filebrowser/filebrowser/releases/latest)
 
-    local url="https://github.com/filebrowser/filebrowser/releases/download/v${latest_version}/${asset}.tar.gz"
+    # Extract the download URL for the matching .tar.gz asset directly from the
+    # API response — avoids hardcoding asset name patterns that change between releases.
+    local url
+    url=$(echo "$release_json" \
+        | grep "browser_download_url" \
+        | grep -iE "${arch_pattern}.*\.tar\.gz" \
+        | head -1 \
+        | sed 's/.*"browser_download_url": *"\([^"]*\)".*/\1/')
+
+    [[ -n "$url" ]] || die "Could not find a filebrowser release asset for arch '${arch}'. Check https://github.com/filebrowser/filebrowser/releases"
+
+    local version
+    version=$(echo "$release_json" | grep '"tag_name"' | sed 's/.*"v\([^"]*\)".*/\1/')
+
     local tmp
     tmp=$(mktemp -d)
     trap 'rm -rf "$tmp"' RETURN
 
-    log_info "Downloading filebrowser v${latest_version} (${asset})..."
+    log_info "Downloading filebrowser v${version} (${arch})..."
     curl -fsSL "$url" | tar -xz -C "$tmp"
     install -m 755 "${tmp}/filebrowser" "$FB_BIN"
     log_ok "filebrowser installed: $("$FB_BIN" version)"
