@@ -107,7 +107,7 @@ sync_jobs:
     source: /mnt/primary/Music
     dest: /mnt/backup/Music/
     schedule: "*-*-* *:00/02:00"
-    rsync_flags: "--archive --delete --checksum"
+    rsync_flags: "--archive --delete --checksum --no-owner --no-group"
     on_failure: notify
     trash:
       enabled: true
@@ -118,7 +118,7 @@ sync_jobs:
     source: /mnt/primary/omv2/
     dest: /mnt/backup/omv2/
     schedule: "*-*-* *:00/01:00"
-    rsync_flags: "--archive --delete"
+    rsync_flags: "--archive --delete --no-owner --no-group"
     on_failure: notify
     trash:
       enabled: true
@@ -129,7 +129,7 @@ sync_jobs:
     source: /mnt/primary/Photo_albums/
     dest: /mnt/backup/Photo_albums/
     schedule: "*-*-* *:00/01:00"
-    rsync_flags: "--archive --delete"
+    rsync_flags: "--archive --delete --no-owner --no-group"
     on_failure: notify
     trash:
       enabled: true
@@ -140,7 +140,7 @@ sync_jobs:
     source: /mnt/primary/test/
     dest: /mnt/backup/test/
     schedule: "*-*-* *:00/01:00"
-    rsync_flags: "--archive --delete"
+    rsync_flags: "--archive --delete --no-owner --no-group"
     on_failure: notify
     trash:
       enabled: true
@@ -151,7 +151,7 @@ sync_jobs:
     source: /mnt/primary/videos/
     dest: /mnt/backup/videos/
     schedule: "*-*-* *:00/01:00"
-    rsync_flags: "--archive --delete"
+    rsync_flags: "--archive --delete --no-owner --no-group"
     on_failure: notify
     trash:
       enabled: true
