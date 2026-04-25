@@ -72,6 +72,10 @@ samba:
       path: /mnt/backup
       read_only: true
       valid_users: "nase"
+    - name: Trash
+      path: /mnt/backup/.trash
+      read_only: true
+      valid_users: "nase"
 
 # --------------------------------------------------------------------------
 # Tailscale
