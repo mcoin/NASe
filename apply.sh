@@ -52,6 +52,10 @@ if config_bool '.tailscale.enabled'; then
     run_module tailscale
 fi
 
+if config_bool '.services.filebrowser.enabled'; then
+    run_module filebrowser
+fi
+
 # ── Install repo-provided systemd units ──────────────────────────────────────
 log_section "Systemd units"
 for unit_src in "${REPO_ROOT}/systemd/"*; do
