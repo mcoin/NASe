@@ -1,0 +1,101 @@
+# NASe configuration — single source of truth.
+# After editing, run: sudo ./apply.sh
+
+nas:
+  hostname: mynas
+
+# --------------------------------------------------------------------------
+# Drives
+# --------------------------------------------------------------------------
+# role:           "main" or "backup"
+# spindown_min:   minutes of inactivity before the drive spins down (0 = never)
+# smart_check:    enable periodic SMART health monitoring
+# --------------------------------------------------------------------------
+drives:
+  - name: primary
+    uuid: "XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX"
+    label: "NAS_PRIMARY"
+    mountpoint: /mnt/primary
+    role: main
+    filesystem: ext4
+    spindown_min: 30
+    smart_check: true
+
+  - name: backup
+    uuid: "YYYYYYYY-YYYY-YYYY-YYYY-YYYYYYYYYYYY"
+    label: "NAS_BACKUP"
+    mountpoint: /mnt/backup
+    role: backup
+    filesystem: ext4
+    spindown_min: 60
+    smart_check: true
+
+# --------------------------------------------------------------------------
+# Samba
+# --------------------------------------------------------------------------
+samba:
+  workgroup: WORKGROUP
+  # Samba users — passwords are read from .env: SAMBA_PASSWORD_<NAME_UPPERCASED>
+  users:
+    - alice
+    - bob
+  shares:
+    - name: Media
+      path: /mnt/primary/media
+      read_only: false
+      valid_users: "alice bob"
+    - name: Documents
+      path: /mnt/primary/docs
+      read_only: false
+      valid_users: "alice"
+    - name: Backup
+      path: /mnt/backup
+      read_only: true
+      valid_users: "alice"
+
+# --------------------------------------------------------------------------
+# Tailscale
+# --------------------------------------------------------------------------
+tailscale:
+  enabled: true
+  # Auth key is read from .env: TAILSCALE_AUTHKEY
+  # Set to true to route all client traffic through this node
+  advertise_exit_node: false
+  # Advertise LAN subnet to other Tailscale nodes (e.g. "192.168.1.0/24")
+  # Leave empty to disable subnet routing
+  advertise_routes: ""
+
+# --------------------------------------------------------------------------
+# Sync jobs
+# --------------------------------------------------------------------------
+# schedule uses systemd OnCalendar format:
+#   "*-*-* 03:00:00"      → daily at 03:00
+#   "*-*-* *:00/30:00"    → every 30 minutes
+#   "Mon *-*-* 02:00:00"  → every Monday at 02:00
+# See: systemd.time(7) or run: systemd-analyze calendar "<expression>"
+#
+# rsync_flags: passed verbatim to rsync
+# on_failure:  "notify" | "ignore"
+# --------------------------------------------------------------------------
+sync_jobs:
+  - name: media-backup
+    source: /mnt/primary/media/
+    dest: /mnt/backup/media/
+    schedule: "*-*-* 03:00:00"
+    rsync_flags: "--archive --delete --checksum"
+    on_failure: notify
+
+  - name: docs-backup
+    source: /mnt/primary/docs/
+    dest: /mnt/backup/docs/
+    schedule: "*-*-* *:00/30:00"
+    rsync_flags: "--archive --delete"
+    on_failure: notify
+
+# --------------------------------------------------------------------------
+# Notifications
+# --------------------------------------------------------------------------
+# method: "email" | "webhook" | "none"
+notifications:
+  method: email
+  email: you@example.com

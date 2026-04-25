@@ -1,0 +1,15 @@
+# Managed by NASe — do not edit manually. Re-run apply.sh instead.
+[Unit]
+Description=NASe drive health monitor (SMART)
+After=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/nas/modules/drives/monitor.sh
+Environment=REPO_ROOT=/opt/nas
+# Logs go to the journal; also visible via: journalctl -u nas-monitor.service
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

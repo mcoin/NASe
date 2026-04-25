@@ -1,0 +1,33 @@
+# Samba global configuration — managed by NASe.
+# The [shares] section below is appended by modules/samba/setup.sh.
+# Do not edit /etc/samba/smb.conf directly; edit config.yaml and re-run apply.sh.
+
+[global]
+   workgroup = __WORKGROUP__
+   server string = NAS Server (%h)
+   server role = standalone server
+
+   # Security
+   security = user
+   map to guest = never
+   smb encrypt = desired
+
+   # Performance
+   socket options = TCP_NODELAY IPTOS_LOWDELAY
+   read raw = yes
+   write raw = yes
+   max xmit = 65535
+   dead time = 15
+
+   # Logging — cap at 10 MB
+   log file = /var/log/samba/log.%m
+   max log size = 10240
+   logging = file
+
+   # Do not share printers
+   load printers = no
+   printing = bsd
+   printcap name = /dev/null
+   disable spoolss = yes
+
+# ── Shares (appended by setup.sh) ─────────────────────────────────────────────
