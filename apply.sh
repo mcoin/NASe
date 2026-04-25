@@ -20,9 +20,11 @@ log_info "Config: ${CONFIG_FILE}"
 # ── Pre-flight ────────────────────────────────────────────────────────────────
 preflight_checks
 
-# Load secrets from .env
+# Load secrets from .env and export them so child processes (modules) can read them
 # shellcheck disable=SC1091
+set -a
 source "${REPO_ROOT}/.env"
+set +a
 
 # Validate config syntax
 "${REPO_ROOT}/tests/validate-config.sh"
@@ -57,13 +59,15 @@ if config_bool '.services.filebrowser.enabled'; then
 fi
 
 # ── Install repo-provided systemd units ──────────────────────────────────────
+# Substitute __REPO_ROOT__ in unit files so they work regardless of clone path.
 log_section "Systemd units"
 for unit_src in "${REPO_ROOT}/systemd/"*; do
     unit_name=$(basename "$unit_src")
     unit_dest="/etc/systemd/system/${unit_name}"
-    if ! diff -q "$unit_src" "$unit_dest" &>/dev/null; then
+    rendered=$(sed "s|__REPO_ROOT__|${REPO_ROOT}|g" "$unit_src")
+    if [[ ! -f "$unit_dest" ]] || ! diff -q <(echo "$rendered") "$unit_dest" &>/dev/null; then
         log_info "Installing unit: ${unit_name}"
-        cp "$unit_src" "$unit_dest"
+        echo "$rendered" > "$unit_dest"
     fi
 done
 

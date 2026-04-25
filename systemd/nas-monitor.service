@@ -5,8 +5,8 @@ After=multi-user.target
 
 [Service]
 Type=oneshot
-ExecStart=/opt/nas/modules/drives/monitor.sh
-Environment=REPO_ROOT=/opt/nas
+ExecStart=__REPO_ROOT__/modules/drives/monitor.sh
+Environment=REPO_ROOT=__REPO_ROOT__
 # Logs go to the journal; also visible via: journalctl -u nas-monitor.service
 StandardOutput=journal
 StandardError=journal
