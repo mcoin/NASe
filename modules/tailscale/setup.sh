@@ -8,10 +8,7 @@ REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 source "${REPO_ROOT}/lib/log.sh"
 source "${REPO_ROOT}/lib/config.sh"
 
-# Secrets are expected to be loaded by the caller (apply.sh sources .env)
 TAILSCALE_AUTHKEY="${TAILSCALE_AUTHKEY:-}"
-
-[[ -n "$TAILSCALE_AUTHKEY" ]] || die "TAILSCALE_AUTHKEY is not set — add it to .env"
 
 command -v tailscale &>/dev/null || die "tailscale not installed — run install.sh first."
 
@@ -50,9 +47,24 @@ fi
 systemctl enable --now tailscaled
 
 # ── Connect / re-authenticate ────────────────────────────────────────────────
-# `tailscale up` is idempotent; it re-authenticates only if the key changed.
-log_info "Running tailscale up (hostname=${hostname_cfg})..."
-tailscale up "${UP_ARGS[@]}"
+# If already connected, run tailscale up without an authkey (updates flags only).
+# If not yet connected, an authkey is required.
+if tailscale status &>/dev/null; then
+    log_info "Tailscale already connected — updating settings..."
+    # Remove --authkey from args since we don't need to re-authenticate
+    RECONNECT_ARGS=()
+    for arg in "${UP_ARGS[@]}"; do
+        [[ "$arg" == "--authkey" ]] && skip_next=true && continue
+        [[ "${skip_next:-false}" == "true" ]] && skip_next=false && continue
+        RECONNECT_ARGS+=("$arg")
+    done
+    tailscale up "${RECONNECT_ARGS[@]}"
+else
+    [[ -n "$TAILSCALE_AUTHKEY" ]] \
+        || die "Tailscale is not connected and TAILSCALE_AUTHKEY is not set — add it to .env"
+    log_info "Connecting Tailscale (hostname=${hostname_cfg})..."
+    tailscale up "${UP_ARGS[@]}"
+fi
 
 log_ok "Tailscale connected. Status:"
 tailscale status
