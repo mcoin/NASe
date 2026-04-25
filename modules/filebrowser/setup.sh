@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # modules/filebrowser/setup.sh
 # Installs and configures filebrowser (https://filebrowser.xyz/).
-# The admin password is read from .env: FILEBROWSER_ADMIN_PASSWORD
+# Username from config.yaml: services.filebrowser.username
+# Password from .env: FILEBROWSER_PASSWORD
 # Idempotent — safe to re-run.
 set -euo pipefail
 
@@ -19,10 +20,11 @@ FB_UNIT="/etc/systemd/system/filebrowser.service"
 port=$(config_get '.services.filebrowser.port')
 root=$(config_get '.services.filebrowser.root')
 base_url=$(config_get '.services.filebrowser.base_url')
-admin_password="${FILEBROWSER_ADMIN_PASSWORD:-}"
+fb_user=$(config_get '.services.filebrowser.username')
+fb_password="${FILEBROWSER_PASSWORD:-}"
 
-[[ -n "$admin_password" ]] \
-    || die "FILEBROWSER_ADMIN_PASSWORD is not set — add it to .env"
+[[ -n "$fb_user" ]]     || die "services.filebrowser.username is not set in config.yaml"
+[[ -n "$fb_password" ]] || die "FILEBROWSER_PASSWORD is not set — add it to .env"
 
 # ── Install binary ────────────────────────────────────────────────────────────
 install_filebrowser() {
@@ -92,12 +94,17 @@ fi
 if [[ ! -f "$FB_DB" ]]; then
     log_info "Initialising filebrowser database..."
     "$FB_BIN" config init --config "$FB_CFG"
-    "$FB_BIN" users add admin "$admin_password" --perm.admin --config "$FB_CFG"
-    log_ok "Admin user created."
+    "$FB_BIN" users add "$fb_user" "$fb_password" --perm.admin --config "$FB_CFG"
+    log_ok "User '${fb_user}' created."
 else
-    # Always sync the admin password from .env so apply.sh is authoritative.
-    log_info "Updating admin password..."
-    "$FB_BIN" users update admin --password "$admin_password" --config "$FB_CFG"
+    # Sync password from .env (apply.sh is authoritative).
+    # If the username changed, create the new user; the old one can be
+    # removed through the filebrowser UI if desired.
+    if ! "$FB_BIN" users update "$fb_user" --password "$fb_password" --config "$FB_CFG" 2>/dev/null; then
+        log_info "User '${fb_user}' not found — creating (username may have changed)..."
+        "$FB_BIN" users add "$fb_user" "$fb_password" --perm.admin --config "$FB_CFG"
+    fi
+    log_ok "User '${fb_user}' updated."
 fi
 
 # ── Systemd service ───────────────────────────────────────────────────────────

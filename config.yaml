@@ -2,7 +2,7 @@
 # After editing, run: sudo ./apply.sh
 
 nas:
-  hostname: mynas
+  hostname: nase
 
 # --------------------------------------------------------------------------
 # Drives
@@ -17,12 +17,12 @@ nas:
 drives:
   - name: primary
     active: true
-    uuid: "XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX"
+    uuid: "532b7925-0236-4dd4-8454-56050eb510d2"
     label: "NAS_PRIMARY"
     mountpoint: /mnt/primary
     role: main
     filesystem: ext4
-    spindown_min: 30
+    spindown_min: 60
     smart_check: true
 
   - name: backup
@@ -42,21 +42,32 @@ samba:
   workgroup: WORKGROUP
   # Samba users — passwords are read from .env: SAMBA_PASSWORD_<NAME_UPPERCASED>
   users:
-    - alice
-    - bob
+    - nase
   shares:
-    - name: Media
-      path: /mnt/primary/media
+    - name: Music
+      path: /mnt/primary/Music
       read_only: false
-      valid_users: "alice bob"
-    - name: Documents
-      path: /mnt/primary/docs
+      valid_users: "nase"
+    - name: omv2
+      path: /mnt/primary/omv2
       read_only: false
-      valid_users: "alice"
+      valid_users: "nase"
+    - name: Photo_albums
+      path: /mnt/primary/Photo_albums
+      read_only: false
+      valid_users: "nase"
+    - name: test
+      path: /mnt/primary/test
+      read_only: false
+      valid_users: "nase"
+    - name: videos
+      path: /mnt/primary/videos
+      read_only: false
+      valid_users: "nase"
     - name: Backup
       path: /mnt/backup
       read_only: true
-      valid_users: "alice"
+      valid_users: "nase"
 
 # --------------------------------------------------------------------------
 # Tailscale
@@ -83,16 +94,16 @@ tailscale:
 # on_failure:  "notify" | "ignore"
 # --------------------------------------------------------------------------
 sync_jobs:
-  - name: media-backup
-    source: /mnt/primary/media/
-    dest: /mnt/backup/media/
+  - name: music-backup
+    source: /mnt/primary/Music
+    dest: /mnt/backup/Music/
     schedule: "*-*-* 03:00:00"
     rsync_flags: "--archive --delete --checksum"
     on_failure: notify
 
-  - name: docs-backup
-    source: /mnt/primary/docs/
-    dest: /mnt/backup/docs/
+  - name: omv2-backup
+    source: /mnt/primary/omv2/
+    dest: /mnt/backup/omv2/
     schedule: "*-*-* *:00/30:00"
     rsync_flags: "--archive --delete"
     on_failure: notify
@@ -107,6 +118,8 @@ services:
     port: 8080
     # Directory exposed as the root of the file browser
     root: /mnt/primary
+    # Login username (password set via FILEBROWSER_PASSWORD in .env)
+    username: nasuser
     # Base URL path if served behind a reverse proxy (e.g. "/files").
     # Leave empty for direct access.
     base_url: ""
@@ -117,4 +130,4 @@ services:
 # method: "email" | "webhook" | "none"
 notifications:
   method: email
-  email: you@example.com
+  email: thomas.vettorel+NASe@example.com
