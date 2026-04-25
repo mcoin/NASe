@@ -44,7 +44,11 @@ if [[ -n "$advertise_routes" ]]; then
 fi
 
 # ── Start tailscaled daemon ───────────────────────────────────────────────────
+# Must be running before we can check connection status or run tailscale up.
 systemctl enable --now tailscaled
+
+# Give the daemon a moment to start if it was just installed
+sleep 2
 
 # ── Connect / re-authenticate ────────────────────────────────────────────────
 # If already connected, run tailscale up without an authkey (updates flags only).
