@@ -46,6 +46,13 @@ n=$(config_len '.drives')
 
 for i in $(seq 0 $((n - 1))); do
     name=$(config_idx '.drives' "$i" '.name')
+    active=$(config_idx '.drives' "$i" '.active')
+
+    if [[ "$active" == "false" ]]; then
+        log_info "Drive '${name}': inactive — skipping spindown."
+        continue
+    fi
+
     uuid=$(config_idx '.drives' "$i" '.uuid')
     spindown_min=$(config_idx '.drives' "$i" '.spindown_min')
 

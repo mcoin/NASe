@@ -13,10 +13,13 @@ failures=()
 n=$(config_len '.drives')
 for i in $(seq 0 $((n - 1))); do
     name=$(config_idx '.drives' "$i" '.name')
-    uuid=$(config_idx '.drives' "$i" '.uuid')
+    active=$(config_idx '.drives' "$i" '.active')
     smart_check=$(config_idx '.drives' "$i" '.smart_check')
 
+    [[ "$active" != "false" ]] || continue
     [[ "$smart_check" == "true" ]] || continue
+
+    uuid=$(config_idx '.drives' "$i" '.uuid')
 
     dev_symlink="/dev/disk/by-uuid/${uuid}"
     if [[ ! -e "$dev_symlink" ]]; then

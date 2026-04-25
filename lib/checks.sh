@@ -30,14 +30,16 @@ check_env_file() {
     [[ -f "$env_file" ]] || die ".env file not found. Copy .env.example to .env and fill in your secrets."
 }
 
-# Warn (not fatal) for any drive UUID that does not yet appear under
-# /dev/disk/by-uuid/.  Drives may be temporarily disconnected.
+# Warn (not fatal) for any active drive UUID that does not yet appear under
+# /dev/disk/by-uuid/.  Inactive drives are silently skipped.
 check_drive_uuids() {
     local n
     n=$(config_len '.drives')
     for i in $(seq 0 $((n - 1))); do
-        local name uuid
+        local name uuid active
         name=$(config_idx '.drives' "$i" '.name')
+        active=$(config_idx '.drives' "$i" '.active')
+        [[ "$active" != "false" ]] || continue
         uuid=$(config_idx '.drives' "$i" '.uuid')
         if [[ ! -e "/dev/disk/by-uuid/${uuid}" ]]; then
             log_warn "Drive '${name}' (UUID ${uuid}) not found under /dev/disk/by-uuid/ — is it connected?"

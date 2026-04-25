@@ -7,12 +7,16 @@ nas:
 # --------------------------------------------------------------------------
 # Drives
 # --------------------------------------------------------------------------
+# active:         false to skip this drive entirely (no mount, no spindown,
+#                 no SMART check).  Useful for pre-configuring a drive before
+#                 it is physically attached.  Defaults to true when omitted.
 # role:           "main" or "backup"
 # spindown_min:   minutes of inactivity before the drive spins down (0 = never)
 # smart_check:    enable periodic SMART health monitoring
 # --------------------------------------------------------------------------
 drives:
   - name: primary
+    active: true
     uuid: "XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX"
     label: "NAS_PRIMARY"
     mountpoint: /mnt/primary
@@ -22,6 +26,7 @@ drives:
     smart_check: true
 
   - name: backup
+    active: false
     uuid: "YYYYYYYY-YYYY-YYYY-YYYY-YYYYYYYYYYYY"
     label: "NAS_BACKUP"
     mountpoint: /mnt/backup

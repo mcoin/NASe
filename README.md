@@ -1,4 +1,4 @@
-# NASe — Raspberry Pi NAS Setup
+# NASe — NAS emulation -  Raspberry Pi NAS Setup
 
 Scripts to turn a Raspberry Pi with USB drives into a self-contained NAS:
 USB drive management, Samba network shares, Tailscale remote access, and automated drive synchronisation — all driven by a single `config.yaml`.

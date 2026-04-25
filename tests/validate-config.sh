@@ -31,12 +31,24 @@ declare -A seen_uuids seen_mountpoints
 for i in $(seq 0 $((n_drives - 1))); do
     prefix=".drives[$i]"
     name=$(config_idx '.drives' "$i" '.name')
+    active=$(config_idx '.drives' "$i" '.active')
     uuid=$(config_idx '.drives' "$i" '.uuid')
     mountpoint=$(config_idx '.drives' "$i" '.mountpoint')
     filesystem=$(config_idx '.drives' "$i" '.filesystem')
     role=$(config_idx '.drives' "$i" '.role')
 
-    [[ -n "$name"        ]] || fail "${prefix}.name is required."
+    [[ -n "$name" ]] || fail "${prefix}.name is required."
+
+    if [[ -n "$active" && "$active" != "true" && "$active" != "false" ]]; then
+        fail "${prefix}.active must be 'true' or 'false' (drive: ${name})."
+    fi
+
+    # Skip detailed validation for inactive drives — they may have placeholder values.
+    if [[ "$active" == "false" ]]; then
+        log_info "  Drive '${name}': inactive — skipping detailed validation."
+        continue
+    fi
+
     [[ -n "$uuid"        ]] || fail "${prefix}.uuid is required (drive: ${name})."
     [[ -n "$mountpoint"  ]] || fail "${prefix}.mountpoint is required (drive: ${name})."
     [[ -n "$filesystem"  ]] || fail "${prefix}.filesystem is required (drive: ${name})."

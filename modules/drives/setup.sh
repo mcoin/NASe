@@ -15,6 +15,14 @@ log_info "Configuring ${n} drive(s)..."
 
 for i in $(seq 0 $((n - 1))); do
     name=$(config_idx '.drives' "$i" '.name')
+    active=$(config_idx '.drives' "$i" '.active')
+
+    # active defaults to true when the field is absent
+    if [[ "$active" == "false" ]]; then
+        log_info "Drive '${name}': inactive — skipping."
+        continue
+    fi
+
     uuid=$(config_idx '.drives' "$i" '.uuid')
     mountpoint=$(config_idx '.drives' "$i" '.mountpoint')
     filesystem=$(config_idx '.drives' "$i" '.filesystem')
