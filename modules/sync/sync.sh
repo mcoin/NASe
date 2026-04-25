@@ -47,6 +47,15 @@ if [[ ! -d "$dest_parent" ]]; then
     exit 0
 fi
 
+# Guard against writing to the root filesystem (SD card) when a destination
+# drive is inactive or unmounted but its directory exists on the SD card.
+root_dev=$(findmnt --target / --output SOURCE --noheadings --first-only)
+dest_dev=$(findmnt --target "$dest_parent" --output SOURCE --noheadings --first-only)
+if [[ "$dest_dev" == "$root_dev" ]]; then
+    log_info "Sync job '${JOB_NAME}': destination '${dest_parent}' is on the root filesystem — drive not mounted, skipping."
+    exit 0
+fi
+
 mkdir -p "$dest_path"
 
 # ── Run rsync ─────────────────────────────────────────────────────────────────
