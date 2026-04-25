@@ -10,6 +10,9 @@ nas:
 # active:         false to skip this drive entirely (no mount, no spindown,
 #                 no SMART check).  Useful for pre-configuring a drive before
 #                 it is physically attached.  Defaults to true when omitted.
+# read_only:      mount the drive read-only. Enforced at the kernel level —
+#                 no user or application can write to it.  Sync jobs
+#                 automatically remount rw for the duration of the sync.
 # role:           "main" or "backup"
 # owner:          user that should own the mountpoint directory.  apply.sh sets
 #                 ownership of the mountpoint itself (instant).  To recursively
@@ -38,7 +41,7 @@ drives:
     filesystem: ext4
     spindown_min: 60
     smart_check: true
-    owner: root
+    read_only: true
 
 # --------------------------------------------------------------------------
 # Samba
@@ -107,7 +110,7 @@ sync_jobs:
     source: /mnt/primary/Music
     dest: /mnt/backup/Music/
     schedule: "*-*-* *:00/02:00"
-    rsync_flags: "--archive --delete --checksum --no-owner --no-group"
+    rsync_flags: "--archive --delete --checksum"
     on_failure: notify
     trash:
       enabled: true
@@ -118,7 +121,7 @@ sync_jobs:
     source: /mnt/primary/omv2/
     dest: /mnt/backup/omv2/
     schedule: "*-*-* *:00/01:00"
-    rsync_flags: "--archive --delete --no-owner --no-group"
+    rsync_flags: "--archive --delete"
     on_failure: notify
     trash:
       enabled: true
@@ -129,7 +132,7 @@ sync_jobs:
     source: /mnt/primary/Photo_albums/
     dest: /mnt/backup/Photo_albums/
     schedule: "*-*-* *:00/01:00"
-    rsync_flags: "--archive --delete --no-owner --no-group"
+    rsync_flags: "--archive --delete"
     on_failure: notify
     trash:
       enabled: true
@@ -140,7 +143,7 @@ sync_jobs:
     source: /mnt/primary/test/
     dest: /mnt/backup/test/
     schedule: "*-*-* *:00/01:00"
-    rsync_flags: "--archive --delete --no-owner --no-group"
+    rsync_flags: "--archive --delete"
     on_failure: notify
     trash:
       enabled: true
@@ -151,7 +154,7 @@ sync_jobs:
     source: /mnt/primary/videos/
     dest: /mnt/backup/videos/
     schedule: "*-*-* *:00/01:00"
-    rsync_flags: "--archive --delete --no-owner --no-group"
+    rsync_flags: "--archive --delete"
     on_failure: notify
     trash:
       enabled: true

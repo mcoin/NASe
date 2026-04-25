@@ -27,6 +27,7 @@ for i in $(seq 0 $((n - 1))); do
     mountpoint=$(config_idx '.drives' "$i" '.mountpoint')
     filesystem=$(config_idx '.drives' "$i" '.filesystem')
     owner=$(config_idx '.drives' "$i" '.owner')
+    read_only=$(config_idx '.drives' "$i" '.read_only')
 
     log_info "Drive '${name}': mountpoint=${mountpoint}, uuid=${uuid}"
 
@@ -59,7 +60,7 @@ Before=multi-user.target
 What=/dev/disk/by-uuid/${uuid}
 Where=${mountpoint}
 Type=${filesystem}
-Options=defaults,nofail,noatime,x-systemd.device-timeout=10s
+Options=${read_only:+ro,}defaults,nofail,noatime,x-systemd.device-timeout=10s
 
 [Install]
 WantedBy=multi-user.target"

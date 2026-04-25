@@ -68,6 +68,19 @@ if [[ "$dest_dev" == "$root_dev" ]]; then
     exit 0
 fi
 
+# ── Remount destination read-write if needed ─────────────────────────────────
+# Find the mountpoint of the destination and check if it is mounted read-only.
+dest_mount=$(findmnt --target "$dest_parent" --output TARGET --noheadings --first-only)
+dest_is_ro=$(findmnt --target "$dest_parent" --output OPTIONS --noheadings --first-only \
+    | grep -qw ro && echo true || echo false)
+
+if [[ "$dest_is_ro" == "true" ]]; then
+    log_info "Remounting ${dest_mount} read-write for sync..."
+    mount -o remount,rw "$dest_mount"
+    # Ensure we remount read-only again when the script exits, even on failure
+    trap 'log_info "Remounting ${dest_mount} read-only..."; mount -o remount,ro "${dest_mount}"' EXIT
+fi
+
 mkdir -p "$dest_path"
 
 # ── Trash setup ───────────────────────────────────────────────────────────────
