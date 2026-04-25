@@ -10,7 +10,6 @@ REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 source "${REPO_ROOT}/lib/log.sh"
 source "${REPO_ROOT}/lib/config.sh"
 
-FB_VERSION="2.31.2"
 FB_BIN="/usr/local/bin/filebrowser"
 FB_DIR="/etc/filebrowser"
 FB_DB="${FB_DIR}/filebrowser.db"
@@ -38,26 +37,27 @@ install_filebrowser() {
         *)     die "Unsupported architecture: ${arch}" ;;
     esac
 
-    local url="https://github.com/filebrowser/filebrowser/releases/download/v${FB_VERSION}/${asset}.tar.gz"
+    log_info "Fetching latest filebrowser release info..."
+    local latest_version
+    latest_version=$(curl -fsSL https://api.github.com/repos/filebrowser/filebrowser/releases/latest \
+        | grep '"tag_name"' | sed 's/.*"v\([^"]*\)".*/\1/')
+    [[ -n "$latest_version" ]] || die "Could not determine latest filebrowser version from GitHub API."
+
+    local url="https://github.com/filebrowser/filebrowser/releases/download/v${latest_version}/${asset}.tar.gz"
     local tmp
     tmp=$(mktemp -d)
     trap 'rm -rf "$tmp"' RETURN
 
-    log_info "Downloading filebrowser v${FB_VERSION} (${asset})..."
+    log_info "Downloading filebrowser v${latest_version} (${asset})..."
     curl -fsSL "$url" | tar -xz -C "$tmp"
     install -m 755 "${tmp}/filebrowser" "$FB_BIN"
     log_ok "filebrowser installed: $("$FB_BIN" version)"
 }
 
-current_version=""
-if [[ -x "$FB_BIN" ]]; then
-    current_version=$("$FB_BIN" version 2>/dev/null | grep -oP 'v\K[\d.]+' | head -1 || true)
-fi
-
-if [[ "$current_version" != "$FB_VERSION" ]]; then
+if [[ ! -x "$FB_BIN" ]]; then
     install_filebrowser
 else
-    log_ok "filebrowser v${FB_VERSION} already installed."
+    log_ok "filebrowser already installed: $("$FB_BIN" version)"
 fi
 
 # ── Config directory and settings ─────────────────────────────────────────────
