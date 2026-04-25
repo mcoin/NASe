@@ -73,6 +73,7 @@ fi
 
 # ── Config directory and settings ─────────────────────────────────────────────
 mkdir -p "$FB_DIR"
+chown "${fb_user}:${fb_user}" "$FB_DIR"
 
 # Ensure the root path exists
 if [[ ! -d "$root" ]]; then
@@ -143,9 +144,8 @@ Type=simple
 ExecStart=${FB_BIN} --config ${FB_CFG}
 Restart=on-failure
 RestartSec=5s
-# Run as root so it can read all drive contents regardless of ownership.
-# Restrict to local network + Tailscale by binding on all interfaces;
-# use a firewall or Tailscale ACLs if tighter access control is needed.
+User=${fb_user}
+Group=${fb_user}
 
 [Install]
 WantedBy=multi-user.target"
