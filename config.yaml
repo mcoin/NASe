@@ -105,7 +105,7 @@ sync_jobs:
   - name: music-backup
     source: /mnt/primary/Music
     dest: /mnt/backup/Music/
-    schedule: "*-*-* 03:00:00"
+    schedule: "*-*-* *:00/02:00"
     rsync_flags: "--archive --delete --checksum"
     on_failure: notify
     trash:
@@ -116,12 +116,45 @@ sync_jobs:
   - name: omv2-backup
     source: /mnt/primary/omv2/
     dest: /mnt/backup/omv2/
-    schedule: "*-*-* *:00/30:00"
+    schedule: "*-*-* *:00/01:00"
     rsync_flags: "--archive --delete"
     on_failure: notify
     trash:
       enabled: true
       path: /mnt/backup/.trash/omv2-backup
+      retention_days: 30
+
+  - name: photos-backup
+    source: /mnt/primary/Photo_albums/
+    dest: /mnt/backup/Photo_albums/
+    schedule: "*-*-* *:00/01:00"
+    rsync_flags: "--archive --delete"
+    on_failure: notify
+    trash:
+      enabled: true
+      path: /mnt/backup/.trash/photos-backup
+      retention_days: 30
+
+  - name: test-backup
+    source: /mnt/primary/test/
+    dest: /mnt/backup/test/
+    schedule: "*-*-* *:00/01:00"
+    rsync_flags: "--archive --delete"
+    on_failure: notify
+    trash:
+      enabled: true
+      path: /mnt/backup/.trash/test-backup
+      retention_days: 30
+
+  - name: videos-backup
+    source: /mnt/primary/videos/
+    dest: /mnt/backup/videos/
+    schedule: "*-*-* *:00/01:00"
+    rsync_flags: "--archive --delete"
+    on_failure: notify
+    trash:
+      enabled: true
+      path: /mnt/backup/.trash/videos-backup
       retention_days: 30
 
 # --------------------------------------------------------------------------
@@ -133,7 +166,7 @@ services:
     # Port the web UI listens on (access via http://<hostname>:<port>)
     port: 8080
     # Directory exposed as the root of the file browser
-    root: /mnt/primary
+    root: /mnt
     # Login username (password set via FILEBROWSER_PASSWORD in .env)
     username: nase
     # Base URL path if served behind a reverse proxy (e.g. "/files").
