@@ -26,10 +26,13 @@ done
 
 [[ "$job_index" -ge 0 ]] || die "Sync job '${JOB_NAME}' not found in config.yaml."
 
-source_path=$(config_idx '.sync_jobs' "$job_index" '.source')
-dest_path=$(config_idx   '.sync_jobs' "$job_index" '.dest')
-rsync_flags=$(config_idx '.sync_jobs' "$job_index" '.rsync_flags')
-on_failure=$(config_idx  '.sync_jobs' "$job_index" '.on_failure')
+source_path=$(config_idx    '.sync_jobs' "$job_index" '.source')
+dest_path=$(config_idx      '.sync_jobs' "$job_index" '.dest')
+rsync_flags=$(config_idx    '.sync_jobs' "$job_index" '.rsync_flags')
+on_failure=$(config_idx     '.sync_jobs' "$job_index" '.on_failure')
+trash_enabled=$(config_idx  '.sync_jobs' "$job_index" '.trash.enabled')
+trash_path=$(config_idx     '.sync_jobs' "$job_index" '.trash.path')
+trash_days=$(config_idx     '.sync_jobs' "$job_index" '.trash.retention_days')
 
 # ── Pre-flight: verify source and destination are accessible ─────────────────
 # A missing path means a drive is inactive or temporarily disconnected — an
@@ -67,21 +70,48 @@ fi
 
 mkdir -p "$dest_path"
 
+# ── Trash setup ───────────────────────────────────────────────────────────────
+# When trash is enabled, deleted/overwritten files are moved to a timestamped
+# subdirectory under trash.path instead of being permanently removed.
+# rsync --backup combined with --delete moves would-be-deleted files to
+# --backup-dir rather than wiping them.
+EXTRA_FLAGS=""
+if [[ "$trash_enabled" == "true" ]] && [[ -n "$trash_path" ]]; then
+    TIMESTAMP=$(date +%Y-%m-%d_%H%M%S)
+    TRASH_RUN_DIR="${trash_path}/${TIMESTAMP}"
+    mkdir -p "$TRASH_RUN_DIR"
+    EXTRA_FLAGS="--backup --backup-dir=${TRASH_RUN_DIR}"
+    log_info "Trash enabled: removed files → ${TRASH_RUN_DIR}"
+fi
+
 # ── Run rsync ─────────────────────────────────────────────────────────────────
 START_TIME=$(date +%s)
 log_info "Starting sync job '${JOB_NAME}': ${source_path} → ${dest_path}"
-log_info "Flags: ${rsync_flags}"
+log_info "Flags: ${rsync_flags}${EXTRA_FLAGS:+ ${EXTRA_FLAGS}}"
 
 RSYNC_LOG="/var/log/nas-sync-${JOB_NAME}.log"
 
 # shellcheck disable=SC2086
-# rsync_flags is intentionally word-split here
-if rsync $rsync_flags \
+# rsync_flags and EXTRA_FLAGS are intentionally word-split here
+if rsync $rsync_flags $EXTRA_FLAGS \
         --log-file="$RSYNC_LOG" \
         "$source_path" "$dest_path"; then
     END_TIME=$(date +%s)
     ELAPSED=$(( END_TIME - START_TIME ))
     log_ok "Sync job '${JOB_NAME}' completed in ${ELAPSED}s."
+
+    # Purge empty trash run directories (nothing was deleted this run)
+    if [[ -n "${TRASH_RUN_DIR:-}" ]] && [[ -d "$TRASH_RUN_DIR" ]]; then
+        find "$TRASH_RUN_DIR" -maxdepth 0 -empty -exec rmdir {} \;
+    fi
+
+    # Purge trash entries older than retention_days
+    if [[ "$trash_enabled" == "true" ]] && [[ -n "$trash_path" ]] \
+            && [[ -n "$trash_days" ]] && [[ "$trash_days" -gt 0 ]]; then
+        log_info "Purging trash older than ${trash_days} days..."
+        find "$trash_path" -mindepth 1 -maxdepth 1 -type d -mtime +"$trash_days" \
+            -exec rm -rf {} \;
+    fi
 else
     RSYNC_EXIT=$?
     END_TIME=$(date +%s)

@@ -104,6 +104,10 @@ sync_jobs:
     schedule: "*-*-* 03:00:00"
     rsync_flags: "--archive --delete --checksum"
     on_failure: notify
+    trash:
+      enabled: true
+      path: /mnt/backup/.trash/music-backup
+      retention_days: 30
 
   - name: omv2-backup
     source: /mnt/primary/omv2/
@@ -111,6 +115,10 @@ sync_jobs:
     schedule: "*-*-* *:00/30:00"
     rsync_flags: "--archive --delete"
     on_failure: notify
+    trash:
+      enabled: true
+      path: /mnt/backup/.trash/omv2-backup
+      retention_days: 30
 
 # --------------------------------------------------------------------------
 # Additional services
