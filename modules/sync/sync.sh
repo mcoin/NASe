@@ -32,25 +32,19 @@ rsync_flags=$(config_idx '.sync_jobs' "$job_index" '.rsync_flags')
 on_failure=$(config_idx  '.sync_jobs' "$job_index" '.on_failure')
 
 # ── Pre-flight: verify source and destination are accessible ─────────────────
+# A missing path means a drive is inactive or temporarily disconnected — an
+# expected condition, not a failure.  Skip silently (exit 0) so that timers
+# don't generate spurious notifications every time they fire.
+# Notifications are reserved for rsync runs that actually start and then fail.
 if [[ ! -d "$source_path" ]]; then
-    msg="Sync job '${JOB_NAME}': source path '${source_path}' does not exist or is not mounted."
-    log_error "$msg"
-    if [[ "$on_failure" == "notify" ]]; then
-        "${REPO_ROOT}/modules/sync/notify.sh" \
-            "NASe sync failed: ${JOB_NAME} on $(hostname)" "$msg" || true
-    fi
-    exit 1
+    log_info "Sync job '${JOB_NAME}': source '${source_path}' not available — skipping."
+    exit 0
 fi
 
 dest_parent=$(dirname "$dest_path")
 if [[ ! -d "$dest_parent" ]]; then
-    msg="Sync job '${JOB_NAME}': destination parent '${dest_parent}' does not exist or is not mounted."
-    log_error "$msg"
-    if [[ "$on_failure" == "notify" ]]; then
-        "${REPO_ROOT}/modules/sync/notify.sh" \
-            "NASe sync failed: ${JOB_NAME} on $(hostname)" "$msg" || true
-    fi
-    exit 1
+    log_info "Sync job '${JOB_NAME}': destination '${dest_parent}' not available — skipping."
+    exit 0
 fi
 
 mkdir -p "$dest_path"
