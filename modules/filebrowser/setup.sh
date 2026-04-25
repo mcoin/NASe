@@ -101,7 +101,13 @@ else
     CONFIG_CHANGED=false
 fi
 
-# ── Initialise database (first run only) ──────────────────────────────────────
+# ── Initialise / update database ─────────────────────────────────────────────
+# Stop the service first so the SQLite database is not locked.
+if systemctl is-active --quiet filebrowser.service 2>/dev/null; then
+    log_info "Stopping filebrowser to update database..."
+    systemctl stop filebrowser.service
+fi
+
 if [[ ! -f "$FB_DB" ]]; then
     log_info "Initialising filebrowser database..."
     "$FB_BIN" config init --config "$FB_CFG"
