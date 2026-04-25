@@ -30,8 +30,8 @@ drives:
     owner: nase
 
   - name: backup
-    active: false
-    uuid: "YYYYYYYY-YYYY-YYYY-YYYY-YYYYYYYYYYYY"
+    active: true
+    uuid: "044b7611-ec84-48e3-9ded-bf6a76876d01"
     label: "NAS_BACKUP"
     mountpoint: /mnt/backup
     role: backup
