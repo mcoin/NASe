@@ -26,6 +26,7 @@ for i in $(seq 0 $((n - 1))); do
     uuid=$(config_idx '.drives' "$i" '.uuid')
     mountpoint=$(config_idx '.drives' "$i" '.mountpoint')
     filesystem=$(config_idx '.drives' "$i" '.filesystem')
+    owner=$(config_idx '.drives' "$i" '.owner')
 
     log_info "Drive '${name}': mountpoint=${mountpoint}, uuid=${uuid}"
 
@@ -33,6 +34,13 @@ for i in $(seq 0 $((n - 1))); do
     if [[ ! -d "$mountpoint" ]]; then
         log_info "  Creating mountpoint ${mountpoint}"
         mkdir -p "$mountpoint"
+    fi
+
+    # Set ownership of the mountpoint itself (non-recursive, instant).
+    # To fix ownership of all existing files run: sudo ./fix-ownership.sh
+    if [[ -n "$owner" ]] && [[ -d "$mountpoint" ]]; then
+        log_info "  Setting owner of ${mountpoint} to '${owner}'"
+        chown "${owner}:${owner}" "$mountpoint"
     fi
 
     # Derive the systemd unit name from the mountpoint path.

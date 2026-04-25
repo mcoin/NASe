@@ -11,6 +11,9 @@ nas:
 #                 no SMART check).  Useful for pre-configuring a drive before
 #                 it is physically attached.  Defaults to true when omitted.
 # role:           "main" or "backup"
+# owner:          user that should own the mountpoint directory.  apply.sh sets
+#                 ownership of the mountpoint itself (instant).  To recursively
+#                 fix ownership of all existing files run: sudo ./fix-ownership.sh
 # spindown_min:   minutes of inactivity before the drive spins down (0 = never)
 # smart_check:    enable periodic SMART health monitoring
 # --------------------------------------------------------------------------
@@ -24,6 +27,7 @@ drives:
     filesystem: ext4
     spindown_min: 60
     smart_check: true
+    owner: nase
 
   - name: backup
     active: false
