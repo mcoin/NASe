@@ -73,7 +73,7 @@ fi
 
 # ── Config directory and settings ─────────────────────────────────────────────
 mkdir -p "$FB_DIR"
-chown "${fb_user}:${fb_user}" "$FB_DIR"
+chown -R "${fb_user}:${fb_user}" "$FB_DIR"
 
 # Ensure the root path exists
 if [[ ! -d "$root" ]]; then
