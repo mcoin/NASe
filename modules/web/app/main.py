@@ -160,20 +160,28 @@ CONFIG_SECTIONS: list[tuple[str, str]] = [
 ]
 _SECTION_KEYS = {k for k, _ in CONFIG_SECTIONS}
 
+def _make_ryaml() -> RuamelYAML:
+    """Return a ruamel.yaml instance configured to match config.yaml's style:
+    2-space mapping indent, list dashes at 2 spaces with content at 4."""
+    ry = RuamelYAML()
+    ry.preserve_quotes = True
+    ry.indent(mapping=2, sequence=4, offset=2)
+    return ry
+
 def _section_to_yaml(value: object) -> str:
     """Serialise a config section value to a YAML string."""
     import io
-    ry = RuamelYAML()
-    ry.default_flow_style = False
     buf = io.StringIO()
-    ry.dump(value, buf)
+    _make_ryaml().dump(value, buf)
     return buf.getvalue()
 
-def _save_section(section: str, new_value: object) -> None:
-    """Load config.yaml with ruamel (preserving comments/order in other
-    sections), update one top-level key, and write back."""
-    ry = RuamelYAML()
-    ry.preserve_quotes = True
+def _save_section(section: str, yaml_text: str) -> None:
+    """Parse yaml_text with ruamel (preserving CommentedMap/Seq metadata),
+    load config.yaml (preserving comments/order in all other sections),
+    update one top-level key, and write back."""
+    import io
+    ry  = _make_ryaml()
+    new_value = ry.load(yaml_text)
     with open(CONFIG_FILE) as f:
         doc = ry.load(f)
     doc[section] = new_value
@@ -231,13 +239,14 @@ async def save_config_section(request: Request, section: str):
     form      = await request.form()
     yaml_text = form.get("yaml_text", "")
 
+    # Validate syntax before touching the file.
     try:
-        new_value = yaml.safe_load(yaml_text)
+        yaml.safe_load(yaml_text)
     except yaml.YAMLError as exc:
         return _err(f"YAML parse error: {exc}")
 
     try:
-        _save_section(section, new_value)
+        _save_section(section, yaml_text)
     except Exception as exc:
         return _err(f"Write error: {exc}")
 
