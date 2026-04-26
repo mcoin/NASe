@@ -31,6 +31,24 @@ for i in $(seq 0 $((n - 1))); do
 
     log_info "Drive '${name}': mountpoint=${mountpoint}, uuid=${uuid}"
 
+    # Remove stale NASe-managed mount units that reference this UUID at a
+    # different mountpoint (i.e. the drive was renamed in config.yaml).
+    for stale_file in "${SYSTEMD_DIR}"/*.mount; do
+        [[ -f "$stale_file" ]] || continue
+        # Only touch units we wrote — they carry the managed-by comment.
+        grep -q "Managed by NASe" "$stale_file" || continue
+        # Must reference this UUID.
+        grep -q "by-uuid/${uuid}" "$stale_file" || continue
+        # Skip if it already points to the correct mountpoint.
+        grep -q "Where=${mountpoint}$" "$stale_file" && continue
+        stale_unit=$(basename "$stale_file")
+        old_mp=$(grep "^Where=" "$stale_file" | cut -d= -f2-)
+        log_info "  Removing stale mount unit ${stale_unit} (was: ${old_mp})"
+        systemctl disable --now "$stale_unit" 2>/dev/null || true
+        rm -f "$stale_file"
+        systemctl daemon-reload
+    done
+
     # Create mountpoint directory
     if [[ ! -d "$mountpoint" ]]; then
         log_info "  Creating mountpoint ${mountpoint}"
