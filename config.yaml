@@ -32,11 +32,22 @@ drives:
     smart_check: true
     owner: nase
 
-  - name: backup
+  - name: backup1
     active: true
     uuid: "044b7611-ec84-48e3-9ded-bf6a76876d01"
-    label: "NAS_BACKUP"
-    mountpoint: /mnt/backup
+    label: "NAS_BACKUP_1"
+    mountpoint: /mnt/backup1
+    role: backup
+    filesystem: ext4
+    spindown_min: 60
+    smart_check: true
+    read_only: true
+
+  - name: backup2
+    active: true
+    uuid: "135c94c8-d188-442a-a8b4-97061c11ac62"
+    label: "NAS_BACKUP_2"
+    mountpoint: /mnt/backup2
     role: backup
     filesystem: ext4
     spindown_min: 60
@@ -72,12 +83,20 @@ samba:
       path: /mnt/primary/videos
       read_only: false
       valid_users: "nase"
-    - name: Backup
-      path: /mnt/backup
+    - name: Backup1
+      path: /mnt/backup1
       read_only: true
       valid_users: "nase"
-    - name: Trash
-      path: /mnt/backup/.trash
+    - name: Trash1
+      path: /mnt/backup1/.trash
+      read_only: true
+      valid_users: "nase"
+    - name: Backup2
+      path: /mnt/backup2
+      read_only: true
+      valid_users: "nase"
+    - name: Trash2
+      path: /mnt/backup2/.trash
       read_only: true
       valid_users: "nase"
 
@@ -110,64 +129,124 @@ tailscale:
 #                  Default: 7. Set to 0 to disable.
 # --------------------------------------------------------------------------
 sync_jobs:
-  - name: music-backup
+  - name: music-backup1
     source: /mnt/primary/Music/
-    dest: /mnt/backup/Music/
+    dest: /mnt/backup1/Music/
+    schedule: "*-*-* *:00/01:00"
+    rsync_flags: "--archive --delete --checksum"
+    on_failure: notify
+    force_sync_days: 7
+    trash:
+      enabled: true
+      path: /mnt/backup1/.trash
+      retention_days: 30
+
+  - name: omv2-backup1
+    source: /mnt/primary/omv2/
+    dest: /mnt/backup1/omv2/
+    schedule: "*-*-* *:00/01:00"
+    rsync_flags: "--archive --delete"
+    on_failure: notify
+    force_sync_days: 7
+    trash:
+      enabled: true
+      path: /mnt/backup1/.trash
+      retention_days: 30
+
+  - name: photos-backup1
+    source: /mnt/primary/Photo_albums/
+    dest: /mnt/backup1/Photo_albums/
+    schedule: "*-*-* *:00/01:00"
+    rsync_flags: "--archive --delete"
+    on_failure: notify
+    force_sync_days: 7
+    trash:
+      enabled: true
+      path: /mnt/backup1/.trash
+      retention_days: 30
+
+  - name: test-backup1
+    source: /mnt/primary/test/
+    dest: /mnt/backup1/test/
+    schedule: "*-*-* *:00/01:00"
+    rsync_flags: "--archive --delete"
+    on_failure: notify
+    force_sync_days: 7
+    trash:
+      enabled: true
+      path: /mnt/backup1/.trash
+      retention_days: 30
+
+  - name: videos-backup1
+    source: /mnt/primary/videos/
+    dest: /mnt/backup1/videos/
+    schedule: "*-*-* *:00/01:00"
+    rsync_flags: "--archive --delete"
+    on_failure: notify
+    force_sync_days: 7
+    trash:
+      enabled: true
+      path: /mnt/backup1/.trash
+      retention_days: 30
+
+  - name: music-backup2
+    source: /mnt/primary/Music/
+    dest: /mnt/backup2/Music/
     schedule: "*-*-* *:00/02:00"
     rsync_flags: "--archive --delete --checksum"
     on_failure: notify
     force_sync_days: 7
     trash:
       enabled: true
-      path: /mnt/backup/.trash
+      path: /mnt/backup2/.trash
       retention_days: 30
 
-  - name: omv2-backup
+  - name: omv2-backup2
     source: /mnt/primary/omv2/
-    dest: /mnt/backup/omv2/
-    schedule: "*-*-* *:00/01:00"
+    dest: /mnt/backup2/omv2/
+    schedule: "*-*-* *:00/02:00"
     rsync_flags: "--archive --delete"
     on_failure: notify
     force_sync_days: 7
     trash:
       enabled: true
-      path: /mnt/backup/.trash
+      path: /mnt/backup2/.trash
       retention_days: 30
 
-  - name: photos-backup
+  - name: photos-backup2
     source: /mnt/primary/Photo_albums/
-    dest: /mnt/backup/Photo_albums/
-    schedule: "*-*-* *:00/01:00"
+    dest: /mnt/backup2/Photo_albums/
+    schedule: "*-*-* *:00/02:00"
     rsync_flags: "--archive --delete"
     on_failure: notify
     force_sync_days: 7
     trash:
       enabled: true
-      path: /mnt/backup/.trash
+      path: /mnt/backup2/.trash
       retention_days: 30
 
-  - name: test-backup
+  - name: test-backup2
     source: /mnt/primary/test/
-    dest: /mnt/backup/test/
-    schedule: "*-*-* *:00/01:00"
+    dest: /mnt/backup2/test/
+    schedule: "*-*-* *:00/02:00"
     rsync_flags: "--archive --delete"
     on_failure: notify
     force_sync_days: 7
     trash:
       enabled: true
-      path: /mnt/backup/.trash
+      path: /mnt/backup2/.trash
       retention_days: 30
 
-  - name: videos-backup
+  - name: videos-backup2
     source: /mnt/primary/videos/
-    dest: /mnt/backup/videos/
-    schedule: "*-*-* *:00/01:00"
+    dest: /mnt/backup2/videos/
+    schedule: "*-*-* *:00/02:00"
     rsync_flags: "--archive --delete"
     on_failure: notify
     force_sync_days: 7
     trash:
       enabled: true
-      path: /mnt/backup/.trash
+      path: /mnt/backup2/.trash
       retention_days: 30
 
 # --------------------------------------------------------------------------
