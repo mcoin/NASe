@@ -105,3 +105,48 @@ done
 
 systemctl daemon-reload
 log_ok "Sync jobs configured."
+
+# ── Ensure trash directories exist ────────────────────────────────────────────
+# Creates the .trash root on each backup drive that needs one.
+# If the drive is mounted read-only, remounts rw briefly, creates the dir, then
+# remounts ro again. Skips drives that are not yet connected.
+declare -A _seen_trash_mounts=()
+
+for i in $(seq 0 $((n - 1))); do
+    trash_enabled=$(config_idx '.sync_jobs' "$i" '.trash.enabled')
+    [[ "$trash_enabled" == "true" ]] || continue
+
+    trash_path=$(config_idx '.sync_jobs' "$i" '.trash.path')
+    [[ -n "$trash_path" ]] || continue
+
+    # Find the mountpoint that owns this trash path.
+    trash_mount=$(findmnt --target "$trash_path" --output TARGET --noheadings --first-only 2>/dev/null || true)
+    if [[ -z "$trash_mount" ]]; then
+        log_info "  Trash dir '${trash_path}': drive not mounted — skipping."
+        continue
+    fi
+
+    # Only act once per mountpoint even if multiple jobs share the same trash root.
+    if [[ -n "${_seen_trash_mounts[$trash_mount]+x}" ]]; then
+        continue
+    fi
+    _seen_trash_mounts["$trash_mount"]=1
+
+    if [[ -d "$trash_path" ]]; then
+        log_info "  Trash dir '${trash_path}': already exists."
+        continue
+    fi
+
+    is_ro=$(findmnt --target "$trash_mount" --output OPTIONS --noheadings --first-only \
+        | grep -qw ro && echo true || echo false)
+
+    if [[ "$is_ro" == "true" ]]; then
+        log_info "  Trash dir '${trash_path}': remounting ${trash_mount} rw to create directory..."
+        mount -o remount,rw "$trash_mount"
+        mkdir -p "$trash_path"
+        mount -o remount,ro "$trash_mount"
+    else
+        mkdir -p "$trash_path"
+    fi
+    log_ok "  Trash dir created: ${trash_path}"
+done
