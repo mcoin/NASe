@@ -49,6 +49,17 @@ for i in $(seq 0 $((n - 1))); do
         systemctl daemon-reload
     done
 
+    # After stopping stale units, the device may still be live at another path
+    # (e.g. a filebrowser bind-mount that was layered on top of the old mount).
+    # Unmount every remaining mount of this device that isn't the target path.
+    while IFS= read -r current_mp; do
+        [[ -z "$current_mp" || "$current_mp" == "$mountpoint" ]] && continue
+        log_info "  Device ${uuid} still live at ${current_mp} — unmounting..."
+        umount "$current_mp" 2>/dev/null \
+            || log_warn "  Could not unmount ${current_mp} — may need manual cleanup"
+    done < <(findmnt --source "/dev/disk/by-uuid/${uuid}" \
+                 --output TARGET --noheadings 2>/dev/null || true)
+
     # Create mountpoint directory
     if [[ ! -d "$mountpoint" ]]; then
         log_info "  Creating mountpoint ${mountpoint}"
