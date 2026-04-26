@@ -1,0 +1,116 @@
+<div class="status-grid">
+
+  <!-- Services -->
+  <div class="card">
+    <div class="card-head">Services</div>
+    <div class="card-body">
+      <table>
+        <thead>
+          <tr>
+            <th>Service</th>
+            <th>Status</th>
+            <th>Detail</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for svc in status.services %}
+          <tr>
+            <td>{{ svc.name }}</td>
+            <td>
+              {% if svc.state == "active" %}
+                <span class="badge badge-ok">active</span>
+              {% elif svc.state == "failed" %}
+                <span class="badge badge-err">failed</span>
+              {% else %}
+                <span class="badge badge-warn">{{ svc.state }}</span>
+              {% endif %}
+            </td>
+            <td class="muted">
+              {% if svc.detail_label %}{{ svc.detail_label }}&nbsp;{% endif %}{{ svc.detail }}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Drives -->
+  <div class="card">
+    <div class="card-head">Drives</div>
+    <div class="card-body">
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Mountpoint</th>
+            <th>Status</th>
+            <th>Mode</th>
+            <th>Usage</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for d in status.drives %}
+          <tr>
+            <td>{{ d.name }}</td>
+            <td class="mono">{{ d.mountpoint }}</td>
+            <td>
+              {% if d.status == "mounted" %}
+                <span class="badge badge-ok">mounted</span>
+              {% elif d.status == "inactive" %}
+                <span class="badge badge-warn">inactive</span>
+              {% else %}
+                <span class="badge badge-err">{{ d.status }}</span>
+              {% endif %}
+            </td>
+            <td class="muted">{{ d.mode or "—" }}</td>
+            <td class="muted">{{ d.usage or "—" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Sync Timers (full-width row) -->
+  <div class="card card-timers">
+    <div class="card-head">Sync Timers</div>
+    <div class="card-body">
+      <table>
+        <thead>
+          <tr>
+            <th>Job</th>
+            <th>Status</th>
+            <th>Next Trigger</th>
+            <th>Last Sync</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for t in status.timers %}
+          <tr>
+            <td>{{ t.name }}</td>
+            <td>
+              {% if t.state == "active" %}
+                <span class="badge badge-ok">active</span>
+              {% elif t.state == "failed" %}
+                <span class="badge badge-err">failed</span>
+              {% else %}
+                <span class="badge badge-warn">{{ t.state }}</span>
+              {% endif %}
+            </td>
+            <td class="muted">{{ t.next }}</td>
+            <td class="muted">
+              {% if t.last == "never" %}
+                never
+              {% else %}
+                {{ t.last }}{% if t.ago %} &nbsp;<em>({{ t.ago }})</em>{% endif %}
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>

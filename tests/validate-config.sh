@@ -125,6 +125,12 @@ for i in $(seq 0 $((n_jobs - 1))); do
     fi
 done
 
+# ── services.web section ──────────────────────────────────────────────────────
+if config_bool '.services.web.enabled' 2>/dev/null; then
+    web_port=$(config_get '.services.web.port')
+    [[ -n "$web_port" ]] || fail ".services.web.port is required when web is enabled."
+fi
+
 # ── notifications section ─────────────────────────────────────────────────────
 method=$(config_get '.notifications.method')
 if [[ "$method" == "email" ]]; then

@@ -1,0 +1,6 @@
+{% if log_lines %}
+{% for entry in log_lines %}<div class="{{ entry.cls }}">{{ entry.text }}</div>
+{% endfor %}
+{% else %}
+<div class="log-info">(no log entries found)</div>
+{% endif %}

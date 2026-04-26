@@ -174,6 +174,11 @@ sync_jobs:
 # Additional services
 # --------------------------------------------------------------------------
 services:
+  web:
+    enabled: true
+    # Port for the NASe web dashboard (status + logs)
+    port: 8088
+
   filebrowser:
     enabled: true
     # Port the web UI listens on (access via http://<hostname>:<port>)

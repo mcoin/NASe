@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NASe — {{ hostname }}</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="https://unpkg.com/htmx.org@1.9.12/dist/htmx.min.js" defer></script>
+</head>
+<body>
+
+<header>
+  <span class="logo">NASe</span>
+  <span class="sep">/</span>
+  <span class="host">{{ hostname }}</span>
+</header>
+
+<main>
+
+  <!-- ── Status (auto-refresh every 30 s) ──────────────────────────────── -->
+  <div id="status-wrap"
+       hx-get="/partials/status"
+       hx-trigger="every 30s"
+       hx-swap="innerHTML">
+    {% include "partials/status.html" %}
+  </div>
+
+  <!-- ── Logs ──────────────────────────────────────────────────────────── -->
+  <div class="card">
+    <div class="card-head">
+      <span>Logs</span>
+      <form id="log-form">
+        <select name="job" class="log-selector">
+          <option value="">Central log</option>
+          {% for name in job_names %}
+          <option value="{{ name }}">{{ name }}</option>
+          {% endfor %}
+        </select>
+      </form>
+    </div>
+    <div id="log-content"
+         class="log-panel"
+         hx-get="/partials/logs"
+         hx-include="#log-form"
+         hx-trigger="every 5s, change from:#log-form select"
+         hx-swap="innerHTML">
+      {% include "partials/logs.html" %}
+    </div>
+  </div>
+
+</main>
+
+<script>
+  // Keep the log panel scrolled to the bottom after each refresh.
+  document.body.addEventListener("htmx:afterSwap", function (e) {
+    if (e.detail.target.id === "log-content") {
+      e.detail.target.scrollTop = e.detail.target.scrollHeight;
+    }
+  });
+  // Scroll on initial load too.
+  window.addEventListener("load", function () {
+    var p = document.getElementById("log-content");
+    if (p) p.scrollTop = p.scrollHeight;
+  });
+</script>
+
+</body>
+</html>

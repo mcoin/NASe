@@ -54,6 +54,10 @@ if config_bool '.tailscale.enabled'; then
     run_module tailscale
 fi
 
+if config_bool '.services.web.enabled'; then
+    run_module web
+fi
+
 if config_bool '.services.filebrowser.enabled'; then
     run_module filebrowser
 fi
