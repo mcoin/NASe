@@ -115,21 +115,31 @@ Optionally set `advertise_routes` (e.g. `192.168.1.0/24`) for subnet routing.
 
 ## Day-to-day operations
 
+The `nase` CLI provides a single entry point for common management tasks:
+
 ```bash
-# Re-apply after editing config.yaml
+nase status                   # Overall system status (services, timers, drives)
+nase drives                   # Drive mount status and disk usage
+
+sudo nase pause               # Stop all sync timers
+sudo nase resume              # Restart all sync timers
+
+sudo nase sync                # Interactive sync job menu
+sudo nase sync music-backup   # Run a specific sync job
+
+nase logs                     # Show recent central log entries
+nase logs -f                  # Follow the central log
+nase logs music-backup        # Show rsync detail log for a specific job
+nase logs -f music-backup     # Follow a specific job's log
+
+sudo nase notify-test         # Send a test notification
+```
+
+For lower-level operations:
+
+```bash
+# Re-apply config.yaml changes
 sudo ./apply.sh
-
-# Run a sync job manually
-sudo /opt/nase/modules/sync/sync.sh media-backup
-
-# Check sync timer status
-systemctl list-timers 'nase-sync-*'
-
-# View sync job logs
-journalctl -u nase-sync-media-backup.service
-
-# View SMART check logs
-journalctl -u nase-monitor.service
 
 # Check Samba
 systemctl status smbd nmbd

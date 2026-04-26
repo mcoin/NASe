@@ -1,0 +1,329 @@
+#!/usr/bin/env bash
+# nase — NASe management CLI
+# Usage: nase <command> [args]
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export REPO_ROOT
+
+source "${REPO_ROOT}/lib/log.sh"
+source "${REPO_ROOT}/lib/config.sh"
+source "${REPO_ROOT}/lib/checks.sh"
+
+# ── Colours for printf (actual escape bytes via $'...', not log.sh literals) ──
+if [[ -t 1 ]]; then
+    _C_RST=$'\e[0m'
+    _C_BOLD=$'\e[1m'
+    _C_GREEN=$'\e[0;32m'
+    _C_RED=$'\e[0;31m'
+    _C_YELLOW=$'\e[0;33m'
+    _C_CYAN=$'\e[0;36m'
+else
+    _C_RST='' _C_BOLD='' _C_GREEN='' _C_RED='' _C_YELLOW='' _C_CYAN=''
+fi
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+# Active state of a systemd unit, e.g. "active" or "inactive"
+_unit_state() { systemctl is-active "$1" 2>/dev/null || true; }
+
+# Enabled state of a systemd unit, e.g. "enabled" or "disabled"
+_unit_enabled() { systemctl is-enabled "$1" 2>/dev/null || true; }
+
+# Convert a systemd USec timestamp (microseconds since epoch) to a readable string.
+_utime() {
+    local usec="$1"
+    [[ -z "$usec" || "$usec" == "0" ]] && echo "—" && return
+    date -d "@$(( usec / 1000000 ))" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo "—"
+}
+
+# Human-readable "time ago" from a Unix timestamp.
+_ago() {
+    local ts="$1"
+    [[ -z "$ts" || "$ts" == "0" ]] && echo "—" && return
+    local diff=$(( $(date +%s) - ts ))
+    if   [[ $diff -lt 60 ]];    then echo "${diff}s ago"
+    elif [[ $diff -lt 3600 ]];  then echo "$(( diff / 60 ))min ago"
+    elif [[ $diff -lt 86400 ]]; then echo "$(( diff / 3600 ))h ago"
+    else echo "$(( diff / 86400 ))d ago"
+    fi
+}
+
+# Coloured state badge for printf (does not add newline).
+_state_badge() {
+    local state="$1"
+    case "$state" in
+        active)   printf "${_C_GREEN}%-8s${_C_RST}" "active"   ;;
+        inactive) printf "${_C_YELLOW}%-8s${_C_RST}" "stopped"  ;;
+        failed)   printf "${_C_RED}%-8s${_C_RST}"   "failed"   ;;
+        *)        printf "${_C_YELLOW}%-8s${_C_RST}" "$state"   ;;
+    esac
+}
+
+# ── status ────────────────────────────────────────────────────────────────────
+
+cmd_status() {
+    printf "\n${_C_BOLD}NASe — System Status${_C_RST}\n\n"
+
+    # ── Services ──────────────────────────────────────────────────────────────
+    printf "${_C_BOLD}Services${_C_RST}\n"
+
+    # SMART monitor timer
+    local monitor_state next_usec next_str
+    monitor_state=$(_unit_state nase-monitor.timer)
+    next_usec=$(systemctl show nase-monitor.timer \
+        --property=NextElapseUSecRealtime --value 2>/dev/null || echo "0")
+    next_str=$(_utime "$next_usec")
+    printf "  %-22s " "nase-monitor"
+    _state_badge "$monitor_state"
+    printf "  next %s\n" "$next_str"
+
+    # Filebrowser
+    if config_bool '.services.filebrowser.enabled' 2>/dev/null; then
+        local fb_state fb_port
+        fb_state=$(_unit_state filebrowser.service)
+        fb_port=$(config_get '.services.filebrowser.port')
+        printf "  %-22s " "filebrowser"
+        _state_badge "$fb_state"
+        [[ "$fb_state" == "active" ]] && printf "  http://localhost:%s" "$fb_port"
+        echo ""
+    fi
+
+    # Tailscale
+    if config_bool '.tailscale.enabled' 2>/dev/null; then
+        local ts_state
+        if tailscale status &>/dev/null; then
+            ts_state="active"
+        else
+            ts_state="not connected"
+        fi
+        printf "  %-22s " "tailscale"
+        _state_badge "$ts_state"
+        echo ""
+    fi
+
+    printf "\n"
+
+    # ── Sync timers ───────────────────────────────────────────────────────────
+    printf "${_C_BOLD}Sync Timers${_C_RST}\n"
+    printf "  %-22s %-10s %-22s %s\n" "JOB" "STATUS" "NEXT TRIGGER" "LAST SYNC"
+    printf "  %s\n" "────────────────────────────────────────────────────────────────────────────"
+
+    local n
+    n=$(config_len '.sync_jobs')
+    for i in $(seq 0 $((n - 1))); do
+        local job_name timer_unit state next_usec next_str stamp_file last_str
+        job_name=$(config_idx '.sync_jobs' "$i" '.name')
+        timer_unit="nase-sync-${job_name}.timer"
+
+        state=$(_unit_state "$timer_unit")
+        next_usec=$(systemctl show "$timer_unit" \
+            --property=NextElapseUSecRealtime --value 2>/dev/null || echo "0")
+        next_str=$(_utime "$next_usec")
+        [[ "$state" != "active" ]] && next_str="—"
+
+        stamp_file="/var/lib/nase/sync-${job_name}.stamp"
+        if [[ -f "$stamp_file" ]]; then
+            local stamp_ts
+            stamp_ts=$(stat -c %Y "$stamp_file")
+            last_str="$(date -d "@${stamp_ts}" '+%Y-%m-%d %H:%M:%S') ($(_ago "$stamp_ts"))"
+        else
+            last_str="never"
+        fi
+
+        printf "  %-22s " "$job_name"
+        _state_badge "$state"
+        printf "  %-22s %s\n" "$next_str" "$last_str"
+    done
+
+    printf "\n"
+
+    # ── Drives ────────────────────────────────────────────────────────────────
+    printf "${_C_BOLD}Drives${_C_RST}\n"
+    _drives_table "  "
+    printf "\n"
+}
+
+# ── pause / resume ────────────────────────────────────────────────────────────
+
+cmd_pause() {
+    local n count=0
+    n=$(config_len '.sync_jobs')
+    for i in $(seq 0 $((n - 1))); do
+        local job timer
+        job=$(config_idx '.sync_jobs' "$i" '.name')
+        timer="nase-sync-${job}.timer"
+        if systemctl is-active --quiet "$timer" 2>/dev/null; then
+            systemctl stop "$timer"
+            log_ok "Stopped ${timer}"
+            (( count++ )) || true
+        else
+            log_info "${timer} is already stopped"
+        fi
+    done
+    if [[ $count -gt 0 ]]; then
+        log_ok "Sync timers paused. Run 'sudo nase resume' to restart."
+    else
+        log_info "No timers were running."
+    fi
+}
+
+cmd_resume() {
+    local n
+    n=$(config_len '.sync_jobs')
+    for i in $(seq 0 $((n - 1))); do
+        local job timer
+        job=$(config_idx '.sync_jobs' "$i" '.name')
+        timer="nase-sync-${job}.timer"
+        if systemctl is-enabled --quiet "$timer" 2>/dev/null; then
+            systemctl start "$timer"
+            log_ok "Started ${timer}"
+        else
+            log_warn "${timer} is not enabled — run 'sudo apply.sh' first"
+        fi
+    done
+    log_ok "Sync timers resumed."
+}
+
+# ── drives ────────────────────────────────────────────────────────────────────
+
+# Shared table renderer; pass an indent string (e.g. "  ") or empty.
+_drives_table() {
+    local indent="${1:-}"
+    local n
+    n=$(config_len '.drives')
+
+    printf "%s%-12s %-20s %-10s %-5s %s\n" \
+        "$indent" "NAME" "MOUNTPOINT" "STATUS" "MODE" "USAGE"
+    printf "%s%s\n" "$indent" \
+        "──────────────────────────────────────────────────────────────────"
+
+    for i in $(seq 0 $((n - 1))); do
+        local name mp active
+        name=$(config_idx   '.drives' "$i" '.name')
+        mp=$(config_idx     '.drives' "$i" '.mountpoint')
+        active=$(config_idx '.drives' "$i" '.active')
+
+        if [[ "$active" == "false" ]]; then
+            printf "%s%-12s %-20s ${_C_YELLOW}%-10s${_C_RST}\n" \
+                "$indent" "$name" "$mp" "inactive"
+            continue
+        fi
+
+        if ! findmnt --target "$mp" --noheadings &>/dev/null; then
+            printf "%s%-12s %-20s ${_C_RED}%-10s${_C_RST}\n" \
+                "$indent" "$name" "$mp" "not mounted"
+            continue
+        fi
+
+        local opts mode usage
+        opts=$(findmnt --target "$mp" \
+            --output OPTIONS --noheadings --first-only 2>/dev/null || echo "")
+        if echo "$opts" | grep -qw ro; then mode="ro"; else mode="rw"; fi
+        usage=$(df -h "$mp" 2>/dev/null \
+            | awk 'NR==2 {print $3 " / " $2 " (" $5 ")"}' || echo "—")
+
+        printf "%s%-12s %-20s ${_C_GREEN}%-10s${_C_RST} %-5s %s\n" \
+            "$indent" "$name" "$mp" "mounted" "$mode" "$usage"
+    done
+}
+
+cmd_drives() {
+    printf "\n${_C_BOLD}Drives${_C_RST}\n"
+    _drives_table
+    printf "\n"
+}
+
+# ── sync ──────────────────────────────────────────────────────────────────────
+
+cmd_sync() {
+    exec "${REPO_ROOT}/sync.sh" "$@"
+}
+
+# ── logs ──────────────────────────────────────────────────────────────────────
+
+cmd_logs() {
+    local follow=false target=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -f|--follow) follow=true ;;
+            *)           target="$1" ;;
+        esac
+        shift
+    done
+
+    local log_file
+    if [[ -z "$target" ]]; then
+        log_file="${NAS_LOG:-/var/log/nase/nase.log}"
+    else
+        log_file="/var/log/nase-sync-${target}.log"
+    fi
+
+    [[ -f "$log_file" ]] || die "Log not found: ${log_file}"
+
+    if [[ "$follow" == "true" ]]; then
+        log_info "Following ${log_file}  (Ctrl-C to stop)"
+        tail -f "$log_file"
+    else
+        tail -n 60 "$log_file"
+    fi
+}
+
+# ── notify-test ───────────────────────────────────────────────────────────────
+
+cmd_notify_test() {
+    # Load secrets so SMTP / webhook settings are available
+    if [[ -f "${REPO_ROOT}/.env" ]]; then
+        set -a; source "${REPO_ROOT}/.env"; set +a
+    fi
+    log_info "Sending test notification..."
+    "${REPO_ROOT}/modules/sync/notify.sh" \
+        "NASe test notification from $(hostname)" \
+        "This is a test message sent via 'nase notify-test' on $(date '+%Y-%m-%d %H:%M:%S')."
+    log_ok "Done."
+}
+
+# ── usage ─────────────────────────────────────────────────────────────────────
+
+usage() {
+    cat <<EOF
+
+${_C_BOLD}Usage:${_C_RST} nase <command> [options]
+
+${_C_BOLD}Commands:${_C_RST}
+  status                  Show overall system status
+  pause                   Stop all sync timers (persists until resume or reboot)
+  resume                  Restart all stopped sync timers
+  drives                  Show drive mount status and disk usage
+  sync [--all | <job>]    Run sync jobs interactively or by name
+  logs [-f] [<job>]       Show recent log entries; -f to follow
+                            (no job = central log, job name = that job's rsync log)
+  notify-test             Send a test notification via the configured method
+
+${_C_BOLD}Examples:${_C_RST}
+  nase status
+  sudo nase pause
+  sudo nase sync music-backup
+  nase logs
+  nase logs -f music-backup
+
+EOF
+}
+
+# ── Dispatch ──────────────────────────────────────────────────────────────────
+
+CMD="${1:-}"
+[[ $# -gt 0 ]] && shift || true
+
+case "$CMD" in
+    status)      cmd_status ;;
+    pause)       check_root; cmd_pause ;;
+    resume)      check_root; cmd_resume ;;
+    drives)      cmd_drives ;;
+    sync)        check_root; cmd_sync "$@" ;;
+    logs)        cmd_logs "$@" ;;
+    notify-test) check_root; cmd_notify_test ;;
+    help|--help|-h|"") usage ;;
+    *) log_error "Unknown command: '${CMD}'"; usage; exit 1 ;;
+esac
