@@ -138,9 +138,19 @@ RSYNC_LOG="/var/log/nase-sync-${JOB_NAME}.log"
 # from rsync's stats summary lines which also go to stdout.
 RSYNC_XFER_TMP=$(mktemp)
 
+# macOS writes AppleDouble resource fork files (._*) and .DS_Store files to
+# SMB shares automatically.  They are meaningless on Linux and are excluded
+# from every sync so they never accumulate on the backup or trigger false
+# trash entries.
+MACOS_EXCLUDES=(
+    "--exclude=._*"
+    "--exclude=.DS_Store"
+)
+
 # shellcheck disable=SC2086
 # rsync_flags and EXTRA_FLAGS are intentionally word-split here
 if rsync $rsync_flags $EXTRA_FLAGS \
+        "${MACOS_EXCLUDES[@]}" \
         --out-format='NXFR %n' \
         --log-file="$RSYNC_LOG" \
         "$source_path" "$dest_path" | tee "$RSYNC_XFER_TMP"; then
