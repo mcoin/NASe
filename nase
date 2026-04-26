@@ -240,47 +240,67 @@ cmd_drives() {
 
 cmd_remount() {
     local mode="${1:-}"
+    local target_name="${2:-}"  # optional: specific drive name
     [[ "$mode" == "rw" || "$mode" == "ro" ]] || {
-        log_error "Usage: nase remount <rw|ro>"
+        log_error "Usage: nase remount <rw|ro> [<drive-name>]"
         exit 1
     }
 
-    # Find the active backup drive mountpoint from config.
-    local backup_mp=""
-    local n i role active mp
+    # Collect active backup drives (all, or the one named by $target_name).
+    local -a backup_mps=()
+    local -a backup_names=()
+    local n i name role active mp
     n=$(config_len '.drives')
     for i in $(seq 0 $((n - 1))); do
         role=$(config_idx   '.drives' "$i" '.role')
         active=$(config_idx '.drives' "$i" '.active')
+        name=$(config_idx   '.drives' "$i" '.name')
         mp=$(config_idx     '.drives' "$i" '.mountpoint')
-        [[ "$role" == "backup" && "$active" != "false" ]] && { backup_mp="$mp"; break; }
+        [[ "$role" == "backup" && "$active" != "false" ]] || continue
+        [[ -z "$target_name" || "$name" == "$target_name" ]] || continue
+        backup_mps+=("$mp")
+        backup_names+=("$name")
     done
 
-    [[ -n "$backup_mp" ]] || die "No active drive with role=backup found in config."
-
-    findmnt --target "$backup_mp" --noheadings &>/dev/null \
-        || die "Backup drive is not mounted at ${backup_mp}."
-
-    # Determine current mode.
-    local current_opts current_mode
-    current_opts=$(findmnt --target "$backup_mp" \
-        --output OPTIONS --noheadings --first-only 2>/dev/null || echo "")
-    if echo "$current_opts" | grep -qw ro; then
-        current_mode="ro"
-    else
-        current_mode="rw"
+    if [[ ${#backup_mps[@]} -eq 0 ]]; then
+        if [[ -n "$target_name" ]]; then
+            die "No active backup drive named '${target_name}' found in config."
+        else
+            die "No active drives with role=backup found in config."
+        fi
     fi
 
-    if [[ "$current_mode" == "$mode" ]]; then
-        log_info "Backup drive at ${backup_mp} is already mounted ${mode}."
-        return 0
-    fi
+    local remounted=0
+    for i in "${!backup_mps[@]}"; do
+        mp="${backup_mps[$i]}"
+        name="${backup_names[$i]}"
 
-    log_info "Remounting ${backup_mp} ${mode}..."
-    mount -o "remount,${mode}" "$backup_mp"
-    log_ok "Backup drive (${backup_mp}) remounted ${mode}."
-    [[ "$mode" == "rw" ]] && \
+        if ! findmnt --target "$mp" --noheadings &>/dev/null; then
+            log_warn "Drive '${name}' is not mounted at ${mp} — skipping."
+            continue
+        fi
+
+        local current_opts current_mode
+        current_opts=$(findmnt --target "$mp" \
+            --output OPTIONS --noheadings --first-only 2>/dev/null || echo "")
+        if echo "$current_opts" | grep -qw ro; then current_mode="ro"
+        else current_mode="rw"
+        fi
+
+        if [[ "$current_mode" == "$mode" ]]; then
+            log_info "Drive '${name}' (${mp}) is already mounted ${mode}."
+            continue
+        fi
+
+        log_info "Remounting ${mp} ${mode}..."
+        mount -o "remount,${mode}" "$mp"
+        log_ok "Drive '${name}' (${mp}) remounted ${mode}."
+        (( remounted++ )) || true
+    done
+
+    if [[ "$mode" == "rw" && $remounted -gt 0 ]]; then
         log_warn "Remember to remount read-only when done:  sudo nase remount ro"
+    fi
 }
 
 # ── sync ──────────────────────────────────────────────────────────────────────
@@ -353,7 +373,8 @@ ${_C_BOLD}Commands:${_C_RST}
   resume                  Restart all stopped sync timers
   drives                  Show drive mount status and disk usage
   sync [--all | <job>]    Run sync jobs interactively or by name
-  remount <rw|ro>         Remount the backup drive read-write or read-only
+  remount <rw|ro> [name]  Remount backup drive(s) rw or ro
+                            (omit name to remount all backup drives)
   logs [-f] [<job>]       Show recent log entries; -f to follow
                             (no job = central log, job name = that job's rsync log)
   web-restart             Restart the web dashboard service
