@@ -8,6 +8,7 @@ set -euo pipefail
 REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 source "${REPO_ROOT}/lib/log.sh"
 source "${REPO_ROOT}/lib/config.sh"
+source "${REPO_ROOT}/lib/guards.sh"
 
 JOB_NAME="${1:-}"
 [[ -n "$JOB_NAME" ]] || die "Usage: sync.sh <job-name>"
@@ -46,29 +47,23 @@ if [[ ! -d "$source_path" ]]; then
     exit 0
 fi
 
-# Ensure source is not on the root filesystem — if the source drive is
-# unmounted but its directory exists, rsync with --delete would wipe the backup.
-root_dev=$(findmnt --target / --output SOURCE --noheadings --first-only)
-source_dev=$(findmnt --target "$source_path" --output SOURCE --noheadings --first-only)
-if [[ "$source_dev" == "$root_dev" ]]; then
-    log_info "Sync job '${JOB_NAME}': source '${source_path}' is on the root filesystem — drive not mounted, skipping."
-    exit 0
-fi
-
 dest_parent=$(dirname "$dest_path")
 if [[ ! -d "$dest_parent" ]]; then
     log_info "Sync job '${JOB_NAME}': destination '${dest_parent}' not available — skipping."
     exit 0
 fi
 
-# Guard against writing to the root filesystem (SD card) when a destination
-# drive is inactive or unmounted but its directory exists on the SD card.
-root_dev=$(findmnt --target / --output SOURCE --noheadings --first-only)
-dest_dev=$(findmnt --target "$dest_parent" --output SOURCE --noheadings --first-only)
-if [[ "$dest_dev" == "$root_dev" ]]; then
-    log_info "Sync job '${JOB_NAME}': destination '${dest_parent}' is on the root filesystem — drive not mounted, skipping."
-    exit 0
-fi
+# Guard against syncing from/to the root filesystem (SD card).
+# This catches two scenarios:
+#   1. The drive is mounted and findmnt reports the root device.
+#   2. The drive is unmounted but its directory exists on the SD card —
+#      in this case findmnt returns empty, which we also treat as unsafe.
+# Without this guard, rsync --delete on an empty source would wipe the backup.
+root_dev=$(get_mount_device /)
+is_safe_mount_path "Sync job '${JOB_NAME}': source" "$source_path" "$root_dev" \
+    || exit 0
+is_safe_mount_path "Sync job '${JOB_NAME}': destination" "$dest_parent" "$root_dev" \
+    || exit 0
 
 # ── Skip if source is unchanged since last sync ───────────────────────────────
 # Avoids spinning up the backup drive when nothing has changed on the source.
@@ -85,7 +80,10 @@ if [[ -f "$STAMP_FILE" ]]; then
         # No changes detected — check whether the forced sync interval has elapsed
         force_sync=false
         if [[ "$force_sync_days" -gt 0 ]]; then
-            stamp_age_days=$(( ( $(date +%s) - $(stat -c %Y "$STAMP_FILE") ) / 86400 ))
+            stamp_mtime=$(stat -c %Y "$STAMP_FILE" 2>/dev/null || echo "0")
+            stamp_age_days=$(( ( $(date +%s) - stamp_mtime ) / 86400 ))
+            # Guard against negative age (e.g. clock correction)
+            [[ $stamp_age_days -lt 0 ]] && stamp_age_days=0
             if [[ "$stamp_age_days" -ge "$force_sync_days" ]]; then
                 force_sync=true
                 log_info "Sync job '${JOB_NAME}': no changes detected, but ${stamp_age_days}d since last sync (threshold: ${force_sync_days}d) — forcing sync."
@@ -101,6 +99,8 @@ fi
 # ── Remount destination read-write if needed ─────────────────────────────────
 # Find the mountpoint of the destination and check if it is mounted read-only.
 dest_mount=$(findmnt --target "$dest_parent" --output TARGET --noheadings --first-only)
+[[ -n "$dest_mount" ]] || die "Could not determine mountpoint for '${dest_parent}'."
+
 dest_is_ro=$(findmnt --target "$dest_parent" --output OPTIONS --noheadings --first-only \
     | grep -qw ro && echo true || echo false)
 
@@ -136,7 +136,14 @@ RSYNC_LOG="/var/log/nase-sync-${JOB_NAME}.log"
 # Temp file to capture per-file rsync output for central log.
 # Uses --out-format with a unique prefix (NXFR) to distinguish file entries
 # from rsync's stats summary lines which also go to stdout.
+# Set up early so the EXIT trap can always clean it up.
 RSYNC_XFER_TMP=$(mktemp)
+if [[ "$dest_is_ro" == "true" ]]; then
+    # Override the earlier trap to include temp file cleanup alongside the remount
+    trap 'rm -f "$RSYNC_XFER_TMP"; log_info "Remounting ${dest_mount} read-only..."; mount -o remount,ro "${dest_mount}"' EXIT
+else
+    trap 'rm -f "$RSYNC_XFER_TMP"' EXIT
+fi
 
 # macOS writes AppleDouble resource fork files (._*) and .DS_Store files to
 # SMB shares automatically.  They are meaningless on Linux and are excluded
@@ -167,7 +174,6 @@ if rsync $rsync_flags $EXTRA_FLAGS \
             [[ -n "$f" ]] && _log_to_file "INFO " "  synced:  ${f}"
         done <<< "$transferred"
     fi
-    rm -f "$RSYNC_XFER_TMP"
 
     # Log files moved to trash this run
     if [[ -n "$TRASH_RUN_DIR" ]] && [[ -d "$TRASH_RUN_DIR" ]]; then
@@ -197,7 +203,6 @@ if rsync $rsync_flags $EXTRA_FLAGS \
     touch "$STAMP_FILE"
 else
     RSYNC_EXIT=$?
-    rm -f "$RSYNC_XFER_TMP"
     END_TIME=$(date +%s)
     ELAPSED=$(( END_TIME - START_TIME ))
     msg="Sync job '${JOB_NAME}' failed after ${ELAPSED}s (rsync exit ${RSYNC_EXIT})."$'\n'"See ${RSYNC_LOG} for details."

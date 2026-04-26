@@ -11,6 +11,8 @@ source "${REPO_ROOT}/lib/config.sh"
 errors=0
 fail() { log_error "  $*"; (( errors++ )) || true; }
 
+command -v yq &>/dev/null || { log_info "yq not found — skipping config validation."; exit 0; }
+
 log_info "Validating ${CONFIG_FILE}..."
 
 # ── Verify yq can parse the file ──────────────────────────────────────────────
