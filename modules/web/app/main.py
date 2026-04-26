@@ -127,7 +127,7 @@ def build_status(cfg: dict) -> dict:
 
 # ── Log helpers ────────────────────────────────────────────────────────────────
 def log_path(job: str | None) -> Path:
-    return LOG_DIR / f"nase-sync-{job}.log" if job else CENTRAL_LOG
+    return Path(f"/var/log/nase-sync-{job}.log") if job else CENTRAL_LOG
 
 def read_log(job: str | None, lines: int = 80) -> list[dict]:
     path = log_path(job)
