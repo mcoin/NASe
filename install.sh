@@ -87,5 +87,5 @@ log_section "Applying configuration"
 
 log_section "Installation complete"
 log_ok "NASe is set up. Review the service status with:"
-log_ok "  systemctl status smbd nas-monitor.service"
-log_ok "  systemctl list-timers 'nas-sync-*'"
+log_ok "  systemctl status smbd nase-monitor.service"
+log_ok "  systemctl list-timers 'nase-sync-*'"

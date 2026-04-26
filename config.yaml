@@ -102,8 +102,12 @@ tailscale:
 #   "Mon *-*-* 02:00:00"  → every Monday at 02:00
 # See: systemd.time(7) or run: systemd-analyze calendar "<expression>"
 #
-# rsync_flags: passed verbatim to rsync
-# on_failure:  "notify" | "ignore"
+# rsync_flags:     passed verbatim to rsync
+# on_failure:      "notify" | "ignore"
+# force_sync_days: run a full sync even when no changes are detected, if this
+#                  many days have passed since the last successful sync.
+#                  Guards against the change-detection mechanism being wrong.
+#                  Default: 7. Set to 0 to disable.
 # --------------------------------------------------------------------------
 sync_jobs:
   - name: music-backup
@@ -112,6 +116,7 @@ sync_jobs:
     schedule: "*-*-* *:00/02:00"
     rsync_flags: "--archive --delete --checksum"
     on_failure: notify
+    force_sync_days: 7
     trash:
       enabled: true
       path: /mnt/backup/.trash
@@ -123,6 +128,7 @@ sync_jobs:
     schedule: "*-*-* *:00/01:00"
     rsync_flags: "--archive --delete"
     on_failure: notify
+    force_sync_days: 7
     trash:
       enabled: true
       path: /mnt/backup/.trash
@@ -134,6 +140,7 @@ sync_jobs:
     schedule: "*-*-* *:00/01:00"
     rsync_flags: "--archive --delete"
     on_failure: notify
+    force_sync_days: 7
     trash:
       enabled: true
       path: /mnt/backup/.trash
@@ -145,6 +152,7 @@ sync_jobs:
     schedule: "*-*-* *:00/01:00"
     rsync_flags: "--archive --delete"
     on_failure: notify
+    force_sync_days: 7
     trash:
       enabled: true
       path: /mnt/backup/.trash
@@ -156,6 +164,7 @@ sync_jobs:
     schedule: "*-*-* *:00/01:00"
     rsync_flags: "--archive --delete"
     on_failure: notify
+    force_sync_days: 7
     trash:
       enabled: true
       path: /mnt/backup/.trash

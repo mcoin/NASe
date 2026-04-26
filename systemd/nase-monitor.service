@@ -7,7 +7,7 @@ After=multi-user.target
 Type=oneshot
 ExecStart=__REPO_ROOT__/modules/drives/monitor.sh
 Environment=REPO_ROOT=__REPO_ROOT__
-# Logs go to the journal; also visible via: journalctl -u nas-monitor.service
+# Logs go to the journal; also visible via: journalctl -u nase-monitor.service
 StandardOutput=journal
 StandardError=journal
 

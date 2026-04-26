@@ -20,7 +20,7 @@ case "$METHOD" in
         SMTP_PORT="${SMTP_PORT:-587}"
         SMTP_USER="${SMTP_USER:-}"
         SMTP_PASSWORD="${SMTP_PASSWORD:-}"
-        SMTP_FROM="${SMTP_FROM:-nas@localhost}"
+        SMTP_FROM="${SMTP_FROM:-nase@localhost}"
 
         if [[ -z "$SMTP_HOST" ]]; then
             log_warn "SMTP_HOST not set — falling back to local sendmail."
@@ -30,12 +30,12 @@ case "$METHOD" in
 
         # Use msmtp if available; otherwise use mailutils mail command
         if command -v msmtp &>/dev/null; then
-            cat > /tmp/nas-msmtprc.$$ <<EOF
+            cat > /tmp/nase-msmtprc.$$ <<EOF
 defaults
 tls on
 tls_starttls on
 
-account nas
+account nase
 host ${SMTP_HOST}
 port ${SMTP_PORT}
 auth on
@@ -44,12 +44,12 @@ password ${SMTP_PASSWORD}
 from ${SMTP_FROM}
 logfile /var/log/msmtp.log
 
-account default : nas
+account default : nase
 EOF
-            trap 'rm -f /tmp/nas-msmtprc.$$' EXIT
+            trap 'rm -f /tmp/nase-msmtprc.$$' EXIT
             printf 'To: %s\nFrom: %s\nSubject: %s\n\n%s\n' \
                 "$RECIPIENT" "$SMTP_FROM" "$SUBJECT" "$BODY" \
-                | msmtp --file="/tmp/nas-msmtprc.$$" "$RECIPIENT"
+                | msmtp --file="/tmp/nase-msmtprc.$$" "$RECIPIENT"
         else
             printf '%s\n' "$BODY" | mail -s "$SUBJECT" "$RECIPIENT"
         fi

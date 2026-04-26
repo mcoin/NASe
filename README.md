@@ -6,9 +6,9 @@ USB drive management, Samba network shares, Tailscale remote access, and automat
 ## Quick start
 
 ```bash
-# 1. Clone onto the Pi (e.g. /opt/nas is the expected install location)
-git clone <repo-url> /opt/nas
-cd /opt/nas
+# 1. Clone onto the Pi (e.g. /opt/nase is the expected install location)
+git clone <repo-url> /opt/nase
+cd /opt/nase
 
 # 2. Fill in secrets
 cp .env.example .env
@@ -63,8 +63,8 @@ nas-setup/
 │       └── notify.sh        # Email / webhook notifications
 │
 ├── systemd/
-│   ├── nas-monitor.service  # Runs monitor.sh (SMART checks)
-│   └── nas-monitor.timer    # Daily at 06:00, also 15 min after boot
+│   ├── nase-monitor.service  # Runs monitor.sh (SMART checks)
+│   └── nase-monitor.timer    # Daily at 06:00, also 15 min after boot
 │
 └── tests/
     └── validate-config.sh   # Validates config.yaml before applying
@@ -120,16 +120,16 @@ Optionally set `advertise_routes` (e.g. `192.168.1.0/24`) for subnet routing.
 sudo ./apply.sh
 
 # Run a sync job manually
-sudo /opt/nas/modules/sync/sync.sh media-backup
+sudo /opt/nase/modules/sync/sync.sh media-backup
 
 # Check sync timer status
-systemctl list-timers 'nas-sync-*'
+systemctl list-timers 'nase-sync-*'
 
 # View sync job logs
-journalctl -u nas-sync-media-backup.service
+journalctl -u nase-sync-media-backup.service
 
 # View SMART check logs
-journalctl -u nas-monitor.service
+journalctl -u nase-monitor.service
 
 # Check Samba
 systemctl status smbd nmbd

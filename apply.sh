@@ -71,8 +71,35 @@ for unit_src in "${REPO_ROOT}/systemd/"*; do
     fi
 done
 
+# ── Migrate old nas-* unit names to nase-* ───────────────────────────────────
+for old_unit in nas-monitor.service nas-monitor.timer; do
+    if systemctl is-enabled --quiet "$old_unit" 2>/dev/null; then
+        log_info "Migrating old unit: ${old_unit} → replacing with nase-* equivalent"
+        systemctl disable --now "$old_unit" 2>/dev/null || true
+        rm -f "/etc/systemd/system/${old_unit}"
+    fi
+done
+for old_timer in /etc/systemd/system/nas-sync-*.timer; do
+    [[ -f "$old_timer" ]] || continue
+    unit=$(basename "$old_timer")
+    log_info "Migrating old unit: ${unit}"
+    systemctl disable --now "$unit" 2>/dev/null || true
+    rm -f "/etc/systemd/system/${unit%.timer}.service" "$old_timer"
+done
+
 systemctl daemon-reload
-systemctl enable --now nas-monitor.service nas-monitor.timer
+systemctl enable --now nase-monitor.service nase-monitor.timer
+
+# ── Logrotate ─────────────────────────────────────────────────────────────────
+log_section "Logrotate"
+LOGROTATE_SRC="${REPO_ROOT}/config/logrotate-nase.conf"
+LOGROTATE_DEST="/etc/logrotate.d/nase"
+if [[ ! -f "$LOGROTATE_DEST" ]] || ! diff -q "$LOGROTATE_SRC" "$LOGROTATE_DEST" &>/dev/null; then
+    log_info "Installing logrotate config: ${LOGROTATE_DEST}"
+    cp "$LOGROTATE_SRC" "$LOGROTATE_DEST"
+    chmod 644 "$LOGROTATE_DEST"
+fi
+log_ok "Log rotation configured (${NAS_LOG}, 90 days)."
 
 log_section "Done"
 log_ok "All modules applied successfully."

@@ -2,7 +2,7 @@
 # modules/sync/sync.sh
 # Runs an rsync job defined in config.yaml by name.
 # Usage (called by systemd):  sync.sh <job-name>
-#        or manually:         sudo /opt/nas/modules/sync/sync.sh <job-name>
+#        or manually:         sudo /opt/nase/modules/sync/sync.sh <job-name>
 set -euo pipefail
 
 REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
@@ -26,13 +26,15 @@ done
 
 [[ "$job_index" -ge 0 ]] || die "Sync job '${JOB_NAME}' not found in config.yaml."
 
-source_path=$(config_idx    '.sync_jobs' "$job_index" '.source')
-dest_path=$(config_idx      '.sync_jobs' "$job_index" '.dest')
-rsync_flags=$(config_idx    '.sync_jobs' "$job_index" '.rsync_flags')
-on_failure=$(config_idx     '.sync_jobs' "$job_index" '.on_failure')
-trash_enabled=$(config_idx  '.sync_jobs' "$job_index" '.trash.enabled')
-trash_path=$(config_idx     '.sync_jobs' "$job_index" '.trash.path')
-trash_days=$(config_idx     '.sync_jobs' "$job_index" '.trash.retention_days')
+source_path=$(config_idx      '.sync_jobs' "$job_index" '.source')
+dest_path=$(config_idx        '.sync_jobs' "$job_index" '.dest')
+rsync_flags=$(config_idx      '.sync_jobs' "$job_index" '.rsync_flags')
+on_failure=$(config_idx       '.sync_jobs' "$job_index" '.on_failure')
+force_sync_days=$(config_idx  '.sync_jobs' "$job_index" '.force_sync_days')
+force_sync_days="${force_sync_days:-7}"
+trash_enabled=$(config_idx    '.sync_jobs' "$job_index" '.trash.enabled')
+trash_path=$(config_idx       '.sync_jobs' "$job_index" '.trash.path')
+trash_days=$(config_idx       '.sync_jobs' "$job_index" '.trash.retention_days')
 
 # ── Pre-flight: verify source and destination are accessible ─────────────────
 # A missing path means a drive is inactive or temporarily disconnected — an
@@ -66,6 +68,34 @@ dest_dev=$(findmnt --target "$dest_parent" --output SOURCE --noheadings --first-
 if [[ "$dest_dev" == "$root_dev" ]]; then
     log_info "Sync job '${JOB_NAME}': destination '${dest_parent}' is on the root filesystem — drive not mounted, skipping."
     exit 0
+fi
+
+# ── Skip if source is unchanged since last sync ───────────────────────────────
+# Avoids spinning up the backup drive when nothing has changed on the source.
+# Checked here, before any interaction with the destination drive.
+# The stamp file is touched after each successful rsync run.
+# On the first run (no stamp file), rsync always proceeds.
+STAMP_DIR="/var/lib/nase"
+STAMP_FILE="${STAMP_DIR}/sync-${JOB_NAME}.stamp"
+
+if [[ -f "$STAMP_FILE" ]]; then
+    # -print -quit exits on the first match — fast even on large trees
+    changed=$(find "$source_path" -newer "$STAMP_FILE" -print -quit 2>/dev/null)
+    if [[ -z "$changed" ]]; then
+        # No changes detected — check whether the forced sync interval has elapsed
+        force_sync=false
+        if [[ "$force_sync_days" -gt 0 ]]; then
+            stamp_age_days=$(( ( $(date +%s) - $(stat -c %Y "$STAMP_FILE") ) / 86400 ))
+            if [[ "$stamp_age_days" -ge "$force_sync_days" ]]; then
+                force_sync=true
+                log_info "Sync job '${JOB_NAME}': no changes detected, but ${stamp_age_days}d since last sync (threshold: ${force_sync_days}d) — forcing sync."
+            fi
+        fi
+        if [[ "$force_sync" == "false" ]]; then
+            log_info "Sync job '${JOB_NAME}': no changes since last sync — skipping."
+            exit 0
+        fi
+    fi
 fi
 
 # ── Remount destination read-write if needed ─────────────────────────────────
@@ -102,16 +132,45 @@ START_TIME=$(date +%s)
 log_info "Starting sync job '${JOB_NAME}': ${source_path} → ${dest_path}"
 log_info "Flags: ${rsync_flags}${EXTRA_FLAGS:+ ${EXTRA_FLAGS}}"
 
-RSYNC_LOG="/var/log/nas-sync-${JOB_NAME}.log"
+RSYNC_LOG="/var/log/nase-sync-${JOB_NAME}.log"
+# Temp file to capture per-file rsync output for central log.
+# Uses --out-format with a unique prefix (NXFR) to distinguish file entries
+# from rsync's stats summary lines which also go to stdout.
+RSYNC_XFER_TMP=$(mktemp)
 
 # shellcheck disable=SC2086
 # rsync_flags and EXTRA_FLAGS are intentionally word-split here
 if rsync $rsync_flags $EXTRA_FLAGS \
+        --out-format='NXFR %n' \
         --log-file="$RSYNC_LOG" \
-        "$source_path" "$dest_path"; then
+        "$source_path" "$dest_path" | tee "$RSYNC_XFER_TMP"; then
     END_TIME=$(date +%s)
     ELAPSED=$(( END_TIME - START_TIME ))
     log_ok "Sync job '${JOB_NAME}' completed in ${ELAPSED}s."
+
+    # Log transferred files to the central log
+    transferred=$(grep '^NXFR ' "$RSYNC_XFER_TMP" | sed 's/^NXFR //' || true)
+    transferred_count=$(echo "$transferred" | grep -c . || true)
+    if [[ "$transferred_count" -gt 0 ]]; then
+        _log_to_file "INFO " "${transferred_count} file(s) transferred:"
+        while IFS= read -r f; do
+            [[ -n "$f" ]] && _log_to_file "INFO " "  synced:  ${f}"
+        done <<< "$transferred"
+    fi
+    rm -f "$RSYNC_XFER_TMP"
+
+    # Log files moved to trash this run
+    if [[ -n "$TRASH_RUN_DIR" ]] && [[ -d "$TRASH_RUN_DIR" ]]; then
+        trash_count=$(find "$TRASH_RUN_DIR" -type f | wc -l | tr -d ' ')
+        if [[ "$trash_count" -gt 0 ]]; then
+            log_info "Trash: ${trash_count} file(s) moved to ${TRASH_RUN_DIR}"
+            _log_to_file "INFO " "${trash_count} file(s) moved to trash:"
+            find "$TRASH_RUN_DIR" -type f -printf '%P\n' 2>/dev/null | sort \
+                | while IFS= read -r f; do
+                    _log_to_file "INFO " "  trashed: ${f}"
+                done
+        fi
+    fi
 
     # Purge timestamp directories under the shared trash root older than
     # retention_days (top-level dirs are named by timestamp, one level up
@@ -122,8 +181,13 @@ if rsync $rsync_flags $EXTRA_FLAGS \
         find "$trash_path" -mindepth 1 -maxdepth 1 -type d -mtime +"$trash_days" \
             -exec rm -rf {} \;
     fi
+
+    # Record successful sync time for change detection on next run
+    mkdir -p "$STAMP_DIR"
+    touch "$STAMP_FILE"
 else
     RSYNC_EXIT=$?
+    rm -f "$RSYNC_XFER_TMP"
     END_TIME=$(date +%s)
     ELAPSED=$(( END_TIME - START_TIME ))
     msg="Sync job '${JOB_NAME}' failed after ${ELAPSED}s (rsync exit ${RSYNC_EXIT})."$'\n'"See ${RSYNC_LOG} for details."

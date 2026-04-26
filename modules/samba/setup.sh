@@ -10,7 +10,7 @@ source "${REPO_ROOT}/lib/config.sh"
 
 TMPL="${REPO_ROOT}/modules/samba/smb.conf.tmpl"
 SAMBA_CONF="/etc/samba/smb.conf"
-GENERATED_CONF="/tmp/nas-smb.conf.$$"
+GENERATED_CONF="/tmp/nase-smb.conf.$$"
 trap 'rm -f "$GENERATED_CONF"' EXIT
 
 # ── Generate smb.conf ─────────────────────────────────────────────────────────

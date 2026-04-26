@@ -8,7 +8,7 @@ OnCalendar=*-*-* 06:00:00
 # Also run 15 minutes after each boot (catches issues after a restart)
 OnBootSec=15min
 Persistent=true
-Unit=nas-monitor.service
+Unit=nase-monitor.service
 
 [Install]
 WantedBy=timers.target

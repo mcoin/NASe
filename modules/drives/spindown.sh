@@ -10,7 +10,7 @@ REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 source "${REPO_ROOT}/lib/log.sh"
 source "${REPO_ROOT}/lib/config.sh"
 
-UDEV_RULES_FILE="/etc/udev/rules.d/99-nas-spindown.rules"
+UDEV_RULES_FILE="/etc/udev/rules.d/99-nase-spindown.rules"
 
 # hdparm -S value encoding:
 #   0        = disable spindown

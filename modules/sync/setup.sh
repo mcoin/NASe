@@ -11,7 +11,7 @@ source "${REPO_ROOT}/lib/config.sh"
 
 SYSTEMD_DIR="/etc/systemd/system"
 SYNC_SCRIPT="${REPO_ROOT}/modules/sync/sync.sh"
-UNIT_PREFIX="nas-sync-"
+UNIT_PREFIX="nase-sync-"
 
 n=$(config_len '.sync_jobs')
 log_info "Configuring ${n} sync job(s)..."

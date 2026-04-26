@@ -18,7 +18,7 @@ advertise_routes=$(config_get '.tailscale.advertise_routes')
 
 if [[ "$advertise_exit_node" == "true" ]] || [[ -n "$advertise_routes" ]]; then
     log_info "Enabling IP forwarding for Tailscale routing..."
-    cat > /etc/sysctl.d/99-nas-tailscale.conf <<'EOF'
+    cat > /etc/sysctl.d/99-nase-tailscale.conf <<'EOF'
 # NASe: required for Tailscale exit node / subnet routing
 net.ipv4.ip_forward = 1
 net.ipv6.conf.all.forwarding = 1
@@ -31,7 +31,7 @@ hostname_cfg=$(config_get '.nas.hostname')
 
 UP_ARGS=(
     --authkey "$TAILSCALE_AUTHKEY"
-    --hostname "${hostname_cfg:-nas}"
+    --hostname "${hostname_cfg:-nase}"
     --accept-routes
 )
 

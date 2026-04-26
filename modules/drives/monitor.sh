@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # modules/drives/monitor.sh
 # Checks SMART health for all configured drives and notifies on failure.
-# Called by nas-monitor.service (via nas-monitor.timer).
+# Called by nase-monitor.service (via nase-monitor.timer).
 set -euo pipefail
 
 REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
