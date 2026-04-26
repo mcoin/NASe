@@ -102,6 +102,12 @@ for i in $(seq 0 $((n_jobs - 1))); do
     [[ -n "$dest"      ]] || fail ".sync_jobs[$i].dest is required (job: ${job_name})."
     [[ -n "$schedule"  ]] || fail ".sync_jobs[$i].schedule is required (job: ${job_name})."
 
+    # Trailing slashes on source and dest are required for correct rsync behaviour:
+    # without a trailing slash on the source rsync copies the directory itself
+    # rather than its contents, producing an unintended extra nesting level.
+    [[ "$source" == */ ]] || fail ".sync_jobs[$i].source must end with '/' (job: ${job_name}). Got: '${source}'"
+    [[ "$dest"   == */ ]] || fail ".sync_jobs[$i].dest must end with '/' (job: ${job_name}). Got: '${dest}'"
+
     if [[ -n "${seen_job_names[$job_name]+x}" ]]; then
         fail "Duplicate sync job name '${job_name}'."
     fi

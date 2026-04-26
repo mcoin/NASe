@@ -29,6 +29,11 @@ done
 
 source_path=$(config_idx      '.sync_jobs' "$job_index" '.source')
 dest_path=$(config_idx        '.sync_jobs' "$job_index" '.dest')
+
+# Ensure trailing slashes — validate-config.sh enforces this, but guard here
+# too so a hand-edited config can't silently produce wrong rsync behaviour.
+[[ "$source_path" == */ ]] || { log_warn "Adding missing trailing slash to source '${source_path}'"; source_path="${source_path}/"; }
+[[ "$dest_path"   == */ ]] || { log_warn "Adding missing trailing slash to dest '${dest_path}'";   dest_path="${dest_path}/";   }
 rsync_flags=$(config_idx      '.sync_jobs' "$job_index" '.rsync_flags')
 on_failure=$(config_idx       '.sync_jobs' "$job_index" '.on_failure')
 force_sync_days=$(config_idx  '.sync_jobs' "$job_index" '.force_sync_days')

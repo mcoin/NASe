@@ -44,7 +44,7 @@ drives:
 
 sync_jobs:
   - name: test-job
-    source: /mnt/primary/data
+    source: /mnt/primary/data/
     dest: /mnt/backup/data/
     schedule: "*-*-* 03:00:00"
     rsync_flags: "--archive --delete"
