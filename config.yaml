@@ -192,4 +192,4 @@ services:
 # method: "email" | "webhook" | "none"
 notifications:
   method: email
-  email: thomas.vettorel+NASe@example.com
+  email: thomas.vettorel+NASe@gmail.com
