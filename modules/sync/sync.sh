@@ -113,9 +113,13 @@ if rsync $rsync_flags $EXTRA_FLAGS \
     ELAPSED=$(( END_TIME - START_TIME ))
     log_ok "Sync job '${JOB_NAME}' completed in ${ELAPSED}s."
 
-    # Purge empty trash run directories (nothing was deleted this run)
+    # Remove empty directories left by rsync inside the trash run dir
+    # (-depth ensures children are processed before parents so that
+    # directories become empty bottom-up and are all removed in one pass).
+    # If everything is empty the run dir itself is removed too — meaning
+    # a timestamp folder only exists when files were actually deleted.
     if [[ -n "${TRASH_RUN_DIR:-}" ]] && [[ -d "$TRASH_RUN_DIR" ]]; then
-        find "$TRASH_RUN_DIR" -maxdepth 0 -empty -exec rmdir {} \;
+        find "$TRASH_RUN_DIR" -depth -type d -empty -delete
     fi
 
     # Purge trash entries older than retention_days
