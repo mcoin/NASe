@@ -29,6 +29,22 @@
   {% endfor %}
 </div>
 
+<div class="card">
+  <div class="card-head">
+    <span>Apply configuration</span>
+    <span class="apply-status" id="apply-status"></span>
+  </div>
+  <div class="card-body">
+    <div class="apply-toolbar">
+      <button id="apply-btn" class="btn-apply" onclick="runApply()">Run apply.sh</button>
+      <span class="apply-hint">Applies <code>config.yaml</code> to all modules and restarts affected services.</span>
+    </div>
+    <div id="apply-wrap" class="apply-wrap" style="display:none">
+      <div id="apply-output" class="apply-panel"></div>
+    </div>
+  </div>
+</div>
+
 {% endblock %}
 
 {% block scripts %}
@@ -38,6 +54,68 @@
     document.querySelectorAll(".tab-btn").forEach(function(b) { b.classList.remove("active"); });
     document.getElementById("panel-" + key).classList.add("active");
     document.querySelector('[data-tab="' + key + '"]').classList.add("active");
+  }
+
+  function applyClass(text) {
+    if (text.includes("[OK   ]")) return "log-ok";
+    if (text.includes("[WARN ]")) return "log-warn";
+    if (text.includes("[ERROR]")) return "log-err";
+    if (text.includes("[-----]")) return "log-section";
+    return "log-info";
+  }
+
+  function runApply() {
+    var btn    = document.getElementById("apply-btn");
+    var out    = document.getElementById("apply-output");
+    var wrap   = document.getElementById("apply-wrap");
+    var status = document.getElementById("apply-status");
+
+    btn.disabled = true;
+    out.innerHTML = "";
+    wrap.style.display = "block";
+    status.textContent = "running…";
+    status.className = "apply-status apply-status-running";
+
+    var es = new EventSource("/apply");
+
+    es.onmessage = function(e) {
+      var div = document.createElement("div");
+      div.className = applyClass(e.data);
+      div.textContent = e.data;
+      out.appendChild(div);
+      out.scrollTop = out.scrollHeight;
+    };
+
+    es.addEventListener("done", function(e) {
+      es.close();
+      btn.disabled = false;
+      var code = parseInt(e.data, 10);
+      var msg = document.createElement("div");
+      if (code === 0) {
+        msg.className = "log-ok";
+        msg.textContent = "— apply finished successfully —";
+        status.textContent = "ok";
+        status.className = "apply-status apply-status-ok";
+      } else {
+        msg.className = "log-err";
+        msg.textContent = "— apply failed (exit " + code + ") —";
+        status.textContent = "failed";
+        status.className = "apply-status apply-status-err";
+      }
+      out.appendChild(msg);
+      out.scrollTop = out.scrollHeight;
+    });
+
+    es.onerror = function() {
+      es.close();
+      btn.disabled = false;
+      var msg = document.createElement("div");
+      msg.className = "log-err";
+      msg.textContent = "— connection error —";
+      out.appendChild(msg);
+      status.textContent = "error";
+      status.className = "apply-status apply-status-err";
+    };
   }
 </script>
 {% endblock %}

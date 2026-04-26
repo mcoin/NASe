@@ -2,6 +2,7 @@
 """NASe web dashboard — FastAPI + HTMX."""
 from __future__ import annotations
 
+import asyncio
 import os
 import subprocess
 from datetime import datetime
@@ -9,7 +10,7 @@ from pathlib import Path
 
 import yaml
 from fastapi import FastAPI, Query, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from ruamel.yaml import YAML as RuamelYAML
@@ -184,7 +185,11 @@ def _save_section(section: str, yaml_text: str) -> None:
     new_value = ry.load(yaml_text)
     with open(CONFIG_FILE) as f:
         doc = ry.load(f)
+    # Preserve any block/inline comments attached to this key in the top-level map.
+    ca = doc.ca.items.get(section)
     doc[section] = new_value
+    if ca is not None:
+        doc.ca.items[section] = ca
     with open(CONFIG_FILE, "w") as f:
         ry.dump(doc, f)
 
@@ -252,3 +257,37 @@ async def save_config_section(request: Request, section: str):
 
     return templates.TemplateResponse(request, "partials/save_result.html",
                                       {"success": True, "message": ""})
+
+# ── Apply ──────────────────────────────────────────────────────────────────────
+_apply_lock = asyncio.Lock()
+
+@app.get("/apply")
+async def apply_config():
+    """Stream apply.sh output as Server-Sent Events."""
+    if _apply_lock.locked():
+        async def _busy():
+            yield "data: [apply already running]\n\n"
+            yield "event: done\ndata: 1\n\n"
+        return StreamingResponse(_busy(), media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-cache",
+                                          "X-Accel-Buffering": "no"})
+
+    async def _stream():
+        async with _apply_lock:
+            proc = await asyncio.create_subprocess_exec(
+                str(REPO_ROOT / "apply.sh"),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+                cwd=str(REPO_ROOT),
+            )
+            async for raw in proc.stdout:
+                line = raw.decode(errors="replace").rstrip("\n")
+                # Escape SSE special chars (newlines inside data field)
+                line = line.replace("\n", " ")
+                yield f"data: {line}\n\n"
+            await proc.wait()
+            yield f"event: done\ndata: {proc.returncode}\n\n"
+
+    return StreamingResponse(_stream(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache",
+                                      "X-Accel-Buffering": "no"})

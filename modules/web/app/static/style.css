@@ -264,6 +264,61 @@ td.mono  { font-family: monospace; font-size: 0.8rem; color: var(--muted); }
   border-radius: 3px;
 }
 
+/* ── Apply card ──────────────────────────────────────────────────────────── */
+.apply-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+}
+
+.apply-hint {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.apply-hint code {
+  font-family: monospace;
+  background: rgba(0,0,0,0.06);
+  padding: 0.1em 0.3em;
+  border-radius: 3px;
+}
+
+.btn-apply {
+  background: #15803d;
+  color: #fff;
+  border: none;
+  padding: 0.45rem 1.1rem;
+  border-radius: var(--radius);
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+  white-space: nowrap;
+}
+
+.btn-apply:hover    { background: #166534; }
+.btn-apply:disabled { background: #6b7280; cursor: not-allowed; }
+
+.apply-status { font-size: 0.7rem; font-weight: 600; }
+.apply-status-running { color: var(--warn); }
+.apply-status-ok      { color: var(--ok);   }
+.apply-status-err     { color: var(--err);  }
+
+.apply-wrap { border-top: 1px solid var(--border); }
+
+.apply-panel {
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  font-size: 0.75rem;
+  line-height: 1.6;
+  background: #0f172a;
+  color: #94a3b8;
+  padding: 0.9rem 1rem;
+  max-height: 480px;
+  overflow-y: auto;
+  border-radius: 0 0 var(--radius) var(--radius);
+}
+
 /* ── HTMX loading indicator ──────────────────────────────────────────────── */
 .htmx-indicator { opacity: 0; transition: opacity 0.2s; }
 .htmx-request .htmx-indicator { opacity: 1; }
