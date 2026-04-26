@@ -127,10 +127,12 @@ _pick_safe_name() {
 backup_vname=$(_pick_safe_name "Backup")
 trash_vname=$(_pick_safe_name  "Trash")
 
-[[ "$backup_vname" != "Backup" ]] && \
+if [[ "$backup_vname" != "Backup" ]]; then
     log_warn "Primary drive has a share named 'Backup' — backup drive virtual folder will be '${backup_vname}'."
-[[ "$trash_vname" != "Trash" ]] && \
+fi
+if [[ "$trash_vname" != "Trash" ]]; then
     log_warn "Primary drive has a share named 'Trash' — trash virtual folder will be '${trash_vname}'."
+fi
 
 # ── Build the virtual root with systemd bind-mount units ──────────────────────
 mkdir -p "$root"
@@ -329,5 +331,9 @@ fi
 log_ok "Filebrowser running on port ${port}."
 log_ok "Access at: http://$(hostname -I | awk '{print $1}'):${port}"
 log_ok "Virtual root: ${root}"
-[[ "$backup_vname" != "Backup" ]] && log_info "  Backup drive → '${backup_vname}/' (collision with primary share 'Backup')"
-[[ "$trash_vname"  != "Trash"  ]] && log_info "  Trash        → '${trash_vname}/'  (collision with primary share 'Trash')"
+if [[ "$backup_vname" != "Backup" ]]; then
+    log_info "  Backup drive → '${backup_vname}/' (collision with primary share 'Backup')"
+fi
+if [[ "$trash_vname" != "Trash" ]]; then
+    log_info "  Trash        → '${trash_vname}/'  (collision with primary share 'Trash')"
+fi
