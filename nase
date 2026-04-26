@@ -236,6 +236,53 @@ cmd_drives() {
     printf "\n"
 }
 
+# ── remount ───────────────────────────────────────────────────────────────────
+
+cmd_remount() {
+    local mode="${1:-}"
+    [[ "$mode" == "rw" || "$mode" == "ro" ]] || {
+        log_error "Usage: nase remount <rw|ro>"
+        exit 1
+    }
+
+    # Find the active backup drive mountpoint from config.
+    local backup_mp=""
+    local n i role active mp
+    n=$(config_len '.drives')
+    for i in $(seq 0 $((n - 1))); do
+        role=$(config_idx   '.drives' "$i" '.role')
+        active=$(config_idx '.drives' "$i" '.active')
+        mp=$(config_idx     '.drives' "$i" '.mountpoint')
+        [[ "$role" == "backup" && "$active" != "false" ]] && { backup_mp="$mp"; break; }
+    done
+
+    [[ -n "$backup_mp" ]] || die "No active drive with role=backup found in config."
+
+    findmnt --target "$backup_mp" --noheadings &>/dev/null \
+        || die "Backup drive is not mounted at ${backup_mp}."
+
+    # Determine current mode.
+    local current_opts current_mode
+    current_opts=$(findmnt --target "$backup_mp" \
+        --output OPTIONS --noheadings --first-only 2>/dev/null || echo "")
+    if echo "$current_opts" | grep -qw ro; then
+        current_mode="ro"
+    else
+        current_mode="rw"
+    fi
+
+    if [[ "$current_mode" == "$mode" ]]; then
+        log_info "Backup drive at ${backup_mp} is already mounted ${mode}."
+        return 0
+    fi
+
+    log_info "Remounting ${backup_mp} ${mode}..."
+    mount -o "remount,${mode}" "$backup_mp"
+    log_ok "Backup drive (${backup_mp}) remounted ${mode}."
+    [[ "$mode" == "rw" ]] && \
+        log_warn "Remember to remount read-only when done:  sudo nase remount ro"
+}
+
 # ── sync ──────────────────────────────────────────────────────────────────────
 
 cmd_sync() {
@@ -299,6 +346,7 @@ ${_C_BOLD}Commands:${_C_RST}
   resume                  Restart all stopped sync timers
   drives                  Show drive mount status and disk usage
   sync [--all | <job>]    Run sync jobs interactively or by name
+  remount <rw|ro>         Remount the backup drive read-write or read-only
   logs [-f] [<job>]       Show recent log entries; -f to follow
                             (no job = central log, job name = that job's rsync log)
   notify-test             Send a test notification via the configured method
@@ -324,6 +372,7 @@ case "$CMD" in
     resume)      check_root; cmd_resume ;;
     drives)      cmd_drives ;;
     sync)        check_root; cmd_sync "$@" ;;
+    remount)     check_root; cmd_remount "$@" ;;
     logs)        cmd_logs "$@" ;;
     notify-test) check_root; cmd_notify_test ;;
     help|--help|-h|"") usage ;;
