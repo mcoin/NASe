@@ -30,11 +30,13 @@ _unit_state() { systemctl is-active "$1" 2>/dev/null || true; }
 # Enabled state of a systemd unit, e.g. "enabled" or "disabled"
 _unit_enabled() { systemctl is-enabled "$1" 2>/dev/null || true; }
 
-# Convert a systemd USec timestamp (microseconds since epoch) to a readable string.
+# Format a timestamp returned by systemctl show --value.
+# systemctl returns a human-readable string like "Mon 2026-04-27 06:00:00 UTC",
+# not a raw microsecond value — pass it straight to date -d for reformatting.
 _utime() {
-    local usec="$1"
-    [[ -z "$usec" || "$usec" == "0" ]] && echo "—" && return
-    date -d "@$(( usec / 1000000 ))" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo "—"
+    local val="$1"
+    [[ -z "$val" || "$val" == "0" || "$val" == "n/a" ]] && echo "—" && return
+    date -d "$val" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo "—"
 }
 
 # Human-readable "time ago" from a Unix timestamp.
@@ -69,11 +71,11 @@ cmd_status() {
     printf "${_C_BOLD}Services${_C_RST}\n"
 
     # SMART monitor timer
-    local monitor_state next_usec next_str
+    local monitor_state next_val next_str
     monitor_state=$(_unit_state nase-monitor.timer)
-    next_usec=$(systemctl show nase-monitor.timer \
-        --property=NextElapseUSecRealtime --value 2>/dev/null || echo "0")
-    next_str=$(_utime "$next_usec")
+    next_val=$(systemctl show nase-monitor.timer \
+        --property=NextElapseUSecRealtime --value 2>/dev/null || echo "")
+    next_str=$(_utime "$next_val")
     printf "  %-22s " "nase-monitor"
     _state_badge "$monitor_state"
     printf "  next %s\n" "$next_str"
@@ -112,14 +114,14 @@ cmd_status() {
     local n
     n=$(config_len '.sync_jobs')
     for i in $(seq 0 $((n - 1))); do
-        local job_name timer_unit state next_usec next_str stamp_file last_str
+        local job_name timer_unit state next_val next_str stamp_file last_str
         job_name=$(config_idx '.sync_jobs' "$i" '.name')
         timer_unit="nase-sync-${job_name}.timer"
 
         state=$(_unit_state "$timer_unit")
-        next_usec=$(systemctl show "$timer_unit" \
-            --property=NextElapseUSecRealtime --value 2>/dev/null || echo "0")
-        next_str=$(_utime "$next_usec")
+        next_val=$(systemctl show "$timer_unit" \
+            --property=NextElapseUSecRealtime --value 2>/dev/null || echo "")
+        next_str=$(_utime "$next_val")
         [[ "$state" != "active" ]] && next_str="—"
 
         stamp_file="/var/lib/nase/sync-${job_name}.stamp"
