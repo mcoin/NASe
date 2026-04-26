@@ -1,6 +1,21 @@
 #!/usr/bin/env bash
 # modules/filebrowser/setup.sh
 # Installs and configures filebrowser (https://filebrowser.xyz/).
+#
+# The file browser root is a virtual directory (services.filebrowser.root,
+# default /srv/filebrowser) that is populated at apply time with systemd bind
+# mount units so the view matches the Samba/Finder layout:
+#
+#   /srv/filebrowser/
+#     Music/         ← bind /mnt/primary/Music
+#     Photo_albums/  ← bind /mnt/primary/Photo_albums
+#     …              ← one entry per primary-drive samba share
+#     Backup/        ← bind /mnt/backup         (collision-safe name)
+#     Trash/         ← bind /mnt/backup/.trash  (collision-safe name)
+#
+# If a primary-drive samba share is already named "Backup" or "Trash", the
+# virtual backup/trash folder gets a "_NAS" suffix to avoid ambiguity.
+#
 # Username from config.yaml: services.filebrowser.username
 # Password from .env: FILEBROWSER_PASSWORD
 # Idempotent — safe to re-run.
@@ -15,6 +30,7 @@ FB_DIR="/etc/filebrowser"
 FB_DB="${FB_DIR}/filebrowser.db"
 FB_CFG="${FB_DIR}/settings.json"
 FB_UNIT="/etc/systemd/system/filebrowser.service"
+SYSTEMD_DIR="/etc/systemd/system"
 
 port=$(config_get '.services.filebrowser.port')
 root=$(config_get '.services.filebrowser.root')
@@ -25,7 +41,7 @@ fb_password="${FILEBROWSER_PASSWORD:-}"
 [[ -n "$fb_user" ]]     || die "services.filebrowser.username is not set in config.yaml"
 [[ -n "$fb_password" ]] || die "FILEBROWSER_PASSWORD is not set — add it to .env"
 
-# ── Install binary ────────────────────────────────────────────────────────────
+# ── Install binary ─────────────────────────────────────────────────────────────
 install_filebrowser() {
     local arch
     arch=$(dpkg --print-architecture)
@@ -71,17 +87,160 @@ else
     log_ok "filebrowser already installed: $("$FB_BIN" version)"
 fi
 
+# ── Resolve drive roles ────────────────────────────────────────────────────────
+primary_mp=""
+backup_mp=""
+n_drives=$(config_len '.drives')
+for i in $(seq 0 $((n_drives - 1))); do
+    drv_role=$(config_idx '.drives' "$i" '.role')
+    drv_active=$(config_idx '.drives' "$i" '.active')
+    [[ "$drv_active" == "false" ]] && continue
+    drv_mp=$(config_idx '.drives' "$i" '.mountpoint')
+    [[ "$drv_role" == "main" ]]   && primary_mp="$drv_mp"
+    [[ "$drv_role" == "backup" ]] && backup_mp="$drv_mp"
+done
+
+[[ -n "$primary_mp" ]] || die "No active drive with role=main found in config."
+
+# ── Collision-safe virtual folder names ───────────────────────────────────────
+# Collect every samba share name that targets the primary drive.
+declare -A _pshares
+n_shares=$(config_len '.samba.shares')
+for i in $(seq 0 $((n_shares - 1))); do
+    sname=$(config_idx '.samba.shares' "$i" '.name')
+    spath=$(config_idx '.samba.shares' "$i" '.path')
+    [[ "$spath" == "${primary_mp}/"* ]] && _pshares["$sname"]=1
+done
+
+# Return a name that does not collide with any primary samba share.
+_pick_safe_name() {
+    local preferred="$1"
+    local candidate="$preferred"
+    local n=1
+    while [[ -n "${_pshares[$candidate]+x}" ]]; do
+        candidate="${preferred}_NAS${n}"
+        (( n++ )) || true
+    done
+    echo "$candidate"
+}
+
+backup_vname=$(_pick_safe_name "Backup")
+trash_vname=$(_pick_safe_name  "Trash")
+
+[[ "$backup_vname" != "Backup" ]] && \
+    log_warn "Primary drive has a share named 'Backup' — backup drive virtual folder will be '${backup_vname}'."
+[[ "$trash_vname" != "Trash" ]] && \
+    log_warn "Primary drive has a share named 'Trash' — trash virtual folder will be '${trash_vname}'."
+
+# ── Build the virtual root with systemd bind-mount units ──────────────────────
+mkdir -p "$root"
+
+# Track units written this run so stale ones can be removed afterwards.
+bind_mount_units=()
+
+# Return the systemd unit name for a given mount path.
+_unit_name_for() { echo "$(systemd-escape --path "$1").mount"; }
+
+# Write (or refresh) a systemd bind-mount unit and start it.
+# Usage: _ensure_bind_mount <source> <target> <after-units>
+_ensure_bind_mount() {
+    local what="$1" where="$2" after_units="${3:-}"
+    mkdir -p "$where"
+
+    local uname
+    uname=$(_unit_name_for "$where")
+    local unit_file="${SYSTEMD_DIR}/${uname}"
+
+    local content
+    content="# Managed by NASe — do not edit manually. Re-run apply.sh instead.
+[Unit]
+Description=NASe filebrowser bind mount ${where}
+After=${after_units}
+
+[Mount]
+What=${what}
+Where=${where}
+Type=none
+Options=bind
+
+[Install]
+WantedBy=filebrowser.service"
+
+    if [[ ! -f "$unit_file" ]] || ! diff -q <(echo "$content") "$unit_file" &>/dev/null; then
+        log_info "Writing ${unit_file}"
+        echo "$content" > "$unit_file"
+        systemctl daemon-reload
+    fi
+
+    # Best-effort: source may not yet be mounted during first apply.
+    systemctl enable --now "$uname" 2>/dev/null || \
+        log_warn "  Could not activate ${uname} (source path may not be mounted yet)"
+
+    bind_mount_units+=("$uname")
+}
+
+# Systemd unit names for the real drive mount points (used in After=).
+primary_mount_unit="$(systemd-escape --path "$primary_mp").mount"
+backup_mount_unit=""
+[[ -n "$backup_mp" ]] && backup_mount_unit="$(systemd-escape --path "$backup_mp").mount"
+
+# One bind mount per primary-drive samba share.
+for i in $(seq 0 $((n_shares - 1))); do
+    sname=$(config_idx '.samba.shares' "$i" '.name')
+    spath=$(config_idx '.samba.shares' "$i" '.path')
+    [[ "$spath" != "${primary_mp}/"* ]] && continue
+    _ensure_bind_mount "$spath" "${root}/${sname}" "$primary_mount_unit"
+done
+
+# Backup drive virtual folder.
+if [[ -n "$backup_mp" ]]; then
+    _ensure_bind_mount "$backup_mp" "${root}/${backup_vname}" "$backup_mount_unit"
+
+    # Trash virtual folder — derive path from first sync job that uses trash.
+    trash_path=""
+    n_jobs=$(config_len '.sync_jobs')
+    for j in $(seq 0 $((n_jobs - 1))); do
+        tp=$(config_idx '.sync_jobs' "$j" '.trash.path')
+        [[ -n "$tp" ]] && { trash_path="$tp"; break; }
+    done
+
+    if [[ -n "$trash_path" && "$trash_path" != "$backup_mp" ]]; then
+        # Ensure the trash directory exists on the backup drive.
+        mkdir -p "$trash_path"
+        _ensure_bind_mount "$trash_path" "${root}/${trash_vname}" "$backup_mount_unit"
+    fi
+fi
+
+# ── Remove stale bind-mount units ─────────────────────────────────────────────
+# Any <root-escaped>-*.mount left over from a previous run (e.g. after a share
+# is renamed or removed) is disabled and deleted.
+root_escaped=$(systemd-escape --path "$root")
+for existing_file in "${SYSTEMD_DIR}/${root_escaped}-"*.mount; do
+    [[ -f "$existing_file" ]] || continue
+    existing_uname=$(basename "$existing_file")
+    found=false
+    for u in "${bind_mount_units[@]:-}"; do
+        [[ "$u" == "$existing_uname" ]] && { found=true; break; }
+    done
+    if [[ "$found" == "false" ]]; then
+        log_info "Removing stale bind-mount unit: ${existing_uname}"
+        systemctl disable --now "$existing_uname" 2>/dev/null || true
+        rm -f "$existing_file"
+        systemctl daemon-reload
+    fi
+done
+
 # ── Config directory and settings ─────────────────────────────────────────────
 mkdir -p "$FB_DIR"
 chown -R "${fb_user}:${fb_user}" "$FB_DIR"
 
-# Ensure the root path exists
+# Ensure the virtual root exists (already created above, but guard anyway).
 if [[ ! -d "$root" ]]; then
-    log_warn "filebrowser root '${root}' does not exist yet (drive may not be mounted). Creating directory."
+    log_warn "filebrowser root '${root}' does not exist yet. Creating directory."
     mkdir -p "$root"
 fi
 
-# Write the JSON settings file (filebrowser reads this via --config)
+# Write the JSON settings file (filebrowser reads this via --config).
 settings=$(cat <<EOF
 {
   "port": ${port},
@@ -126,18 +285,22 @@ else
 fi
 
 # ── Systemd service ───────────────────────────────────────────────────────────
+# Build the After= list: real drive mounts + all bind-mount units.
+after_units="network.target"
+for i in $(seq 0 $((n_drives - 1))); do
+    active=$(config_idx '.drives' "$i" '.active')
+    [[ "$active" != "false" ]] || continue
+    mp=$(config_idx '.drives' "$i" '.mountpoint')
+    after_units+=" $(systemd-escape --path "$mp").mount"
+done
+for u in "${bind_mount_units[@]:-}"; do
+    after_units+=" ${u}"
+done
+
 unit_content="# Managed by NASe — do not edit manually. Re-run apply.sh instead.
 [Unit]
 Description=Filebrowser — web-based file manager
-After=network.target $(
-    m=$(config_len '.drives')
-    for j in $(seq 0 $((m - 1))); do
-        active=$(config_idx '.drives' "$j" '.active')
-        [[ "$active" != "false" ]] || continue
-        mp=$(config_idx '.drives' "$j" '.mountpoint')
-        echo -n "$(systemd-escape --path "$mp").mount "
-    done
-)
+After=${after_units}
 
 [Service]
 Type=simple
@@ -165,3 +328,6 @@ fi
 
 log_ok "Filebrowser running on port ${port}."
 log_ok "Access at: http://$(hostname -I | awk '{print $1}'):${port}"
+log_ok "Virtual root: ${root}"
+[[ "$backup_vname" != "Backup" ]] && log_info "  Backup drive → '${backup_vname}/' (collision with primary share 'Backup')"
+[[ "$trash_vname"  != "Trash"  ]] && log_info "  Trash        → '${trash_vname}/'  (collision with primary share 'Trash')"

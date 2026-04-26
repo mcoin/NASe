@@ -178,8 +178,13 @@ services:
     enabled: true
     # Port the web UI listens on (access via http://<hostname>:<port>)
     port: 8080
-    # Directory exposed as the root of the file browser
-    root: /mnt
+    # Virtual root exposed by the file browser.  apply.sh populates this
+    # directory with bind mounts so the view mirrors the Samba/Finder layout:
+    # primary-drive shares appear at the top level; the backup drive and trash
+    # appear as "Backup" and "Trash" virtual folders (names get a "_NAS" suffix
+    # if a primary-drive share already uses those names).
+    # Do not set this to /mnt — that would expose the raw primary/backup level.
+    root: /srv/filebrowser
     # Login username (password set via FILEBROWSER_PASSWORD in .env)
     username: nase
     # Base URL path if served behind a reverse proxy (e.g. "/files").
