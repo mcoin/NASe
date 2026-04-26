@@ -84,17 +84,17 @@ fi
 mkdir -p "$dest_path"
 
 # ── Trash setup ───────────────────────────────────────────────────────────────
-# When trash is enabled, deleted/overwritten files are moved to a timestamped
-# subdirectory under trash.path instead of being permanently removed.
-# rsync --backup combined with --delete moves would-be-deleted files to
-# --backup-dir rather than wiping them.
+# When trash is enabled, files deleted from the destination are moved to a
+# timestamped subdirectory rather than being permanently removed.
+# rsync creates --backup-dir automatically and only when it has files to
+# put there — so no pre-creation, and no empty directories to clean up.
 EXTRA_FLAGS=""
+TRASH_RUN_DIR=""
 if [[ "$trash_enabled" == "true" ]] && [[ -n "$trash_path" ]]; then
     TIMESTAMP=$(date +%Y-%m-%d_%H%M%S)
     TRASH_RUN_DIR="${trash_path}/${TIMESTAMP}/${JOB_NAME}"
-    mkdir -p "$TRASH_RUN_DIR"
     EXTRA_FLAGS="--backup --backup-dir=${TRASH_RUN_DIR}"
-    log_info "Trash enabled: removed files → ${TRASH_RUN_DIR}"
+    log_info "Trash enabled: deleted files will go to ${TRASH_RUN_DIR}"
 fi
 
 # ── Run rsync ─────────────────────────────────────────────────────────────────
@@ -112,20 +112,6 @@ if rsync $rsync_flags $EXTRA_FLAGS \
     END_TIME=$(date +%s)
     ELAPSED=$(( END_TIME - START_TIME ))
     log_ok "Sync job '${JOB_NAME}' completed in ${ELAPSED}s."
-
-    # Remove empty directories left by rsync inside the trash run dir
-    # (-depth ensures children are processed before parents so that
-    # directories become empty bottom-up and are all removed in one pass).
-    # If everything is empty the run dir itself is removed too — meaning
-    # a timestamp folder only exists when files were actually deleted.
-    # Clean up empty directories bottom-up. TRASH_RUN_DIR is
-    # trash_path/TIMESTAMP/JOB_NAME — also clean the parent timestamp
-    # dir if it ends up empty (i.e. no other job deleted anything).
-    if [[ -n "${TRASH_RUN_DIR:-}" ]] && [[ -d "$TRASH_RUN_DIR" ]]; then
-        find "$TRASH_RUN_DIR" -depth -type d -empty -delete
-        TRASH_TIMESTAMP_DIR=$(dirname "$TRASH_RUN_DIR")
-        find "$TRASH_TIMESTAMP_DIR" -maxdepth 0 -empty -delete 2>/dev/null || true
-    fi
 
     # Purge timestamp directories under the shared trash root older than
     # retention_days (top-level dirs are named by timestamp, one level up
