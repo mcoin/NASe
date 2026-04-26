@@ -31,10 +31,14 @@ for i in $(seq 0 $((n_shares - 1))); do
 
     [[ "$read_only" == "true" ]] && ro_str="yes" || ro_str="no"
 
-    # Ensure share directory exists on the filesystem
+    # Ensure share directory exists on the filesystem.
+    # Skip silently if the drive isn't mounted or is read-only.
     if [[ ! -d "$share_path" ]]; then
-        log_info "  Creating share directory: ${share_path}"
-        mkdir -p "$share_path"
+        if mkdir -p "$share_path" 2>/dev/null; then
+            log_info "  Created share directory: ${share_path}"
+        else
+            log_warn "  Cannot create ${share_path} — drive not mounted or read-only; skipping."
+        fi
     fi
 
     log_info "  Share '${share_name}': path=${share_path}, read_only=${ro_str}"
