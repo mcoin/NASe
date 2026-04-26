@@ -60,8 +60,13 @@ for i in $(seq 0 $((n - 1))); do
     for current_mp in "${stale_mps[@]:-}"; do
         [[ -n "$current_mp" ]] || continue
         log_info "  Device ${uuid} still live at ${current_mp} — unmounting..."
-        umount "$current_mp" 2>/dev/null \
-            || log_warn "  Could not unmount ${current_mp} — may need manual cleanup"
+        if ! umount "$current_mp" 2>/dev/null; then
+            # Regular unmount failed (busy processes holding open handles).
+            # Lazy unmount detaches from the hierarchy immediately; the kernel
+            # completes the release once all open file handles are closed.
+            umount -l "$current_mp" 2>/dev/null \
+                || log_warn "  Could not unmount ${current_mp} — may need manual cleanup"
+        fi
     done
 
     # Create mountpoint directory
