@@ -111,7 +111,7 @@ tailscale:
 # --------------------------------------------------------------------------
 sync_jobs:
   - name: music-backup
-    source: /mnt/primary/Music
+    source: /mnt/primary/Music/
     dest: /mnt/backup/Music/
     schedule: "*-*-* *:00/02:00"
     rsync_flags: "--archive --delete --checksum"
