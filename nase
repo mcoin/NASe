@@ -265,7 +265,7 @@ cmd_logs() {
     [[ -f "$log_file" ]] || die "Log not found: ${log_file}"
 
     if [[ "$follow" == "true" ]]; then
-        log_info "Following ${log_file}  (Ctrl-C to stop)"
+        echo "Following ${log_file}  (Ctrl-C to stop)"
         tail -f "$log_file"
     else
         tail -n 60 "$log_file"
