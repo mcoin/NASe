@@ -114,7 +114,7 @@ sync_jobs:
     on_failure: notify
     trash:
       enabled: true
-      path: /mnt/backup/.trash/music-backup
+      path: /mnt/backup/.trash
       retention_days: 30
 
   - name: omv2-backup
@@ -125,7 +125,7 @@ sync_jobs:
     on_failure: notify
     trash:
       enabled: true
-      path: /mnt/backup/.trash/omv2-backup
+      path: /mnt/backup/.trash
       retention_days: 30
 
   - name: photos-backup
@@ -136,7 +136,7 @@ sync_jobs:
     on_failure: notify
     trash:
       enabled: true
-      path: /mnt/backup/.trash/photos-backup
+      path: /mnt/backup/.trash
       retention_days: 30
 
   - name: test-backup
@@ -147,7 +147,7 @@ sync_jobs:
     on_failure: notify
     trash:
       enabled: true
-      path: /mnt/backup/.trash/test-backup
+      path: /mnt/backup/.trash
       retention_days: 30
 
   - name: videos-backup
@@ -158,7 +158,7 @@ sync_jobs:
     on_failure: notify
     trash:
       enabled: true
-      path: /mnt/backup/.trash/videos-backup
+      path: /mnt/backup/.trash
       retention_days: 30
 
 # --------------------------------------------------------------------------

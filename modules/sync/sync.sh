@@ -91,7 +91,7 @@ mkdir -p "$dest_path"
 EXTRA_FLAGS=""
 if [[ "$trash_enabled" == "true" ]] && [[ -n "$trash_path" ]]; then
     TIMESTAMP=$(date +%Y-%m-%d_%H%M%S)
-    TRASH_RUN_DIR="${trash_path}/${TIMESTAMP}"
+    TRASH_RUN_DIR="${trash_path}/${TIMESTAMP}/${JOB_NAME}"
     mkdir -p "$TRASH_RUN_DIR"
     EXTRA_FLAGS="--backup --backup-dir=${TRASH_RUN_DIR}"
     log_info "Trash enabled: removed files → ${TRASH_RUN_DIR}"
@@ -118,11 +118,18 @@ if rsync $rsync_flags $EXTRA_FLAGS \
     # directories become empty bottom-up and are all removed in one pass).
     # If everything is empty the run dir itself is removed too — meaning
     # a timestamp folder only exists when files were actually deleted.
+    # Clean up empty directories bottom-up. TRASH_RUN_DIR is
+    # trash_path/TIMESTAMP/JOB_NAME — also clean the parent timestamp
+    # dir if it ends up empty (i.e. no other job deleted anything).
     if [[ -n "${TRASH_RUN_DIR:-}" ]] && [[ -d "$TRASH_RUN_DIR" ]]; then
         find "$TRASH_RUN_DIR" -depth -type d -empty -delete
+        TRASH_TIMESTAMP_DIR=$(dirname "$TRASH_RUN_DIR")
+        find "$TRASH_TIMESTAMP_DIR" -maxdepth 0 -empty -delete 2>/dev/null || true
     fi
 
-    # Purge trash entries older than retention_days
+    # Purge timestamp directories under the shared trash root older than
+    # retention_days (top-level dirs are named by timestamp, one level up
+    # from the per-job subdirectory).
     if [[ "$trash_enabled" == "true" ]] && [[ -n "$trash_path" ]] \
             && [[ -n "$trash_days" ]] && [[ "$trash_days" -gt 0 ]]; then
         log_info "Purging trash older than ${trash_days} days..."
