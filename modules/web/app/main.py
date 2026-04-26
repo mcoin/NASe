@@ -151,8 +151,7 @@ def read_log(job: str | None, lines: int = 80) -> list[dict]:
 async def index(request: Request):
     cfg       = load_config()
     job_names = [j["name"] for j in cfg.get("sync_jobs", [])]
-    return templates.TemplateResponse("index.html", {
-        "request":   request,
+    return templates.TemplateResponse(request, "index.html", {
         "hostname":  cfg.get("nas", {}).get("hostname", "nase"),
         "status":    build_status(cfg),
         "job_names": job_names,
@@ -162,14 +161,12 @@ async def index(request: Request):
 @app.get("/partials/status", response_class=HTMLResponse)
 async def partial_status(request: Request):
     cfg = load_config()
-    return templates.TemplateResponse("partials/status.html", {
-        "request": request,
-        "status":  build_status(cfg),
+    return templates.TemplateResponse(request, "partials/status.html", {
+        "status": build_status(cfg),
     })
 
 @app.get("/partials/logs", response_class=HTMLResponse)
 async def partial_logs(request: Request, job: str | None = Query(None)):
-    return templates.TemplateResponse("partials/logs.html", {
-        "request":   request,
+    return templates.TemplateResponse(request, "partials/logs.html", {
         "log_lines": read_log(job),
     })
