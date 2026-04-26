@@ -59,15 +59,31 @@ RestartSec=5s
 [Install]
 WantedBy=multi-user.target"
 
+need_restart=false
+
 if [[ ! -f "$WEB_UNIT" ]] || ! diff -q <(echo "$unit_content") "$WEB_UNIT" &>/dev/null; then
     log_info "Writing ${WEB_UNIT}"
     echo "$unit_content" > "$WEB_UNIT"
     systemctl daemon-reload
+    need_restart=true
+fi
+
+# Restart only when the app code or requirements changed.
+STAMP_DIR="/var/lib/nase"
+mkdir -p "$STAMP_DIR"
+app_hash=$(find "${WEB_DIR}/app" "${WEB_DIR}/requirements.txt" -type f | sort \
+           | xargs sha256sum 2>/dev/null | sha256sum | cut -d' ' -f1)
+hash_stamp="${STAMP_DIR}/web-app.hash"
+if [[ ! -f "$hash_stamp" ]] || [[ "$(cat "$hash_stamp")" != "$app_hash" ]]; then
+    need_restart=true
+    echo "$app_hash" > "$hash_stamp"
 fi
 
 systemctl enable --now nase-web.service
-
-# Restart if the app code changed since last apply.
-systemctl restart nase-web.service
-log_ok "NASe web dashboard running on port ${port}."
+if $need_restart; then
+    systemctl restart nase-web.service
+    log_ok "NASe web dashboard restarted on port ${port}."
+else
+    log_ok "NASe web dashboard already up to date — no restart needed."
+fi
 log_ok "Access at: http://$(hostname -I | awk '{print $1}'):${port}"
