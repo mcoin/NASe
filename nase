@@ -319,6 +319,13 @@ cmd_logs() {
     fi
 }
 
+# ── web-restart ───────────────────────────────────────────────────────────────
+
+cmd_web_restart() {
+    systemctl restart nase-web.service
+    log_ok "nase-web.service restarted."
+}
+
 # ── notify-test ───────────────────────────────────────────────────────────────
 
 cmd_notify_test() {
@@ -349,6 +356,7 @@ ${_C_BOLD}Commands:${_C_RST}
   remount <rw|ro>         Remount the backup drive read-write or read-only
   logs [-f] [<job>]       Show recent log entries; -f to follow
                             (no job = central log, job name = that job's rsync log)
+  web-restart             Restart the web dashboard service
   notify-test             Send a test notification via the configured method
 
 ${_C_BOLD}Examples:${_C_RST}
@@ -374,6 +382,7 @@ case "$CMD" in
     sync)        check_root; cmd_sync "$@" ;;
     remount)     check_root; cmd_remount "$@" ;;
     logs)        cmd_logs "$@" ;;
+    web-restart) check_root; cmd_web_restart ;;
     notify-test) check_root; cmd_notify_test ;;
     help|--help|-h|"") usage ;;
     *) log_error "Unknown command: '${CMD}'"; usage; exit 1 ;;
