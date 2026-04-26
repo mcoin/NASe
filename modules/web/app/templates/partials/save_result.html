@@ -1,0 +1,5 @@
+{% if success %}
+<span class="save-ok">&#10003; Saved. Run <code>sudo apply.sh</code> to apply.</span>
+{% else %}
+<span class="save-err">&#10007; {{ message }}</span>
+{% endif %}

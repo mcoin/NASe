@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}NASe{% endblock %} — {{ hostname }}</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="https://unpkg.com/htmx.org@1.9.12/dist/htmx.min.js" defer></script>
+</head>
+<body>
+
+<header>
+  <span class="logo">NASe</span>
+  <span class="sep">/</span>
+  <span class="host">{{ hostname }}</span>
+</header>
+
+<nav class="site-nav">
+  <a href="/"       {% if page == "dashboard" %}class="active"{% endif %}>Dashboard</a>
+  <a href="/config" {% if page == "config"    %}class="active"{% endif %}>Config</a>
+</nav>
+
+<main>
+{% block content %}{% endblock %}
+</main>
+
+{% block scripts %}{% endblock %}
+
+</body>
+</html>

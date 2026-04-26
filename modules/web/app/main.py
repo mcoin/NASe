@@ -12,6 +12,7 @@ from fastapi import FastAPI, Query, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from ruamel.yaml import YAML as RuamelYAML
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
 APP_DIR     = Path(__file__).parent
@@ -146,6 +147,39 @@ def read_log(job: str | None, lines: int = 80) -> list[dict]:
         result.append({"text": text, "cls": cls})
     return result
 
+# ── Config sections ────────────────────────────────────────────────────────────
+# Order and display labels for the config editor tabs.
+CONFIG_SECTIONS: list[tuple[str, str]] = [
+    ("nas",           "General"),
+    ("drives",        "Drives"),
+    ("samba",         "Samba"),
+    ("sync_jobs",     "Sync Jobs"),
+    ("services",      "Services"),
+    ("tailscale",     "Tailscale"),
+    ("notifications", "Notifications"),
+]
+_SECTION_KEYS = {k for k, _ in CONFIG_SECTIONS}
+
+def _section_to_yaml(value: object) -> str:
+    """Serialise a config section value to a YAML string."""
+    import io
+    ry = RuamelYAML()
+    ry.default_flow_style = False
+    buf = io.StringIO()
+    ry.dump(value, buf)
+    return buf.getvalue()
+
+def _save_section(section: str, new_value: object) -> None:
+    """Load config.yaml with ruamel (preserving comments/order in other
+    sections), update one top-level key, and write back."""
+    ry = RuamelYAML()
+    ry.preserve_quotes = True
+    with open(CONFIG_FILE) as f:
+        doc = ry.load(f)
+    doc[section] = new_value
+    with open(CONFIG_FILE, "w") as f:
+        ry.dump(doc, f)
+
 # ── Routes ─────────────────────────────────────────────────────────────────────
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
@@ -153,6 +187,7 @@ async def index(request: Request):
     job_names = [j["name"] for j in cfg.get("sync_jobs", [])]
     return templates.TemplateResponse(request, "index.html", {
         "hostname":  cfg.get("nas", {}).get("hostname", "nase"),
+        "page":      "dashboard",
         "status":    build_status(cfg),
         "job_names": job_names,
         "log_lines": read_log(None),
@@ -170,3 +205,41 @@ async def partial_logs(request: Request, job: str | None = Query(None)):
     return templates.TemplateResponse(request, "partials/logs.html", {
         "log_lines": read_log(job),
     })
+
+@app.get("/config", response_class=HTMLResponse)
+async def config_page(request: Request, tab: str = Query("nas")):
+    cfg        = load_config()
+    active_tab = tab if tab in _SECTION_KEYS else "nas"
+    section_yaml = {k: _section_to_yaml(cfg.get(k)) for k, _ in CONFIG_SECTIONS}
+    return templates.TemplateResponse(request, "config.html", {
+        "hostname":     cfg.get("nas", {}).get("hostname", "nase"),
+        "page":         "config",
+        "sections":     CONFIG_SECTIONS,
+        "section_yaml": section_yaml,
+        "active_tab":   active_tab,
+    })
+
+@app.post("/config/{section}", response_class=HTMLResponse)
+async def save_config_section(request: Request, section: str):
+    def _err(msg: str):
+        return templates.TemplateResponse(request, "partials/save_result.html",
+                                          {"success": False, "message": msg})
+
+    if section not in _SECTION_KEYS:
+        return _err(f"Unknown section '{section}'.")
+
+    form      = await request.form()
+    yaml_text = form.get("yaml_text", "")
+
+    try:
+        new_value = yaml.safe_load(yaml_text)
+    except yaml.YAMLError as exc:
+        return _err(f"YAML parse error: {exc}")
+
+    try:
+        _save_section(section, new_value)
+    except Exception as exc:
+        return _err(f"Write error: {exc}")
+
+    return templates.TemplateResponse(request, "partials/save_result.html",
+                                      {"success": True, "message": ""})
