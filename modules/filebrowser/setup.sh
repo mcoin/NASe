@@ -234,9 +234,13 @@ for existing_file in "${SYSTEMD_DIR}/${root_escaped}-"*.mount; do
     done
     if [[ "$found" == "false" ]]; then
         log_info "Removing stale bind-mount unit: ${existing_uname}"
+        stale_where=$(grep '^Where=' "$existing_file" | cut -d= -f2-)
         systemctl disable --now "$existing_uname" 2>/dev/null || true
         rm -f "$existing_file"
         systemctl daemon-reload
+        if [[ -n "$stale_where" && -d "$stale_where" ]] && ! mountpoint -q "$stale_where" 2>/dev/null; then
+            rmdir "$stale_where" 2>/dev/null && log_info "  Removed stale mountpoint: ${stale_where}" || true
+        fi
     fi
 done
 
