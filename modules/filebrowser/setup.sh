@@ -7,14 +7,16 @@
 # mount units so the view matches the Samba/Finder layout:
 #
 #   /srv/filebrowser/
-#     Music/         ← bind /mnt/primary/Music
-#     Photo_albums/  ← bind /mnt/primary/Photo_albums
-#     …              ← one entry per primary-drive samba share
-#     Backup/        ← bind /mnt/backup         (collision-safe name)
-#     Trash/         ← bind /mnt/backup/.trash  (collision-safe name)
+#     Music/            ← bind /mnt/primary/Music
+#     Photo_albums/     ← bind /mnt/primary/Photo_albums
+#     …                 ← one entry per primary-drive samba share
+#     Backup_daily/     ← bind /mnt/backup_daily   (one per backup drive, named after drive)
+#     Trash_daily/      ← bind /mnt/backup_daily/.trash
+#     Backup_weekly/    ← bind /mnt/backup_weekly
+#     Trash_weekly/     ← bind /mnt/backup_weekly/.trash
 #
-# If a primary-drive samba share is already named "Backup" or "Trash", the
-# virtual backup/trash folder gets a "_NAS" suffix to avoid ambiguity.
+# Virtual folder names are the drive name with first char capitalised (backup_daily →
+# Backup_daily). If a primary share already uses that name, a "_NAS<n>" suffix is added.
 #
 # Username from config.yaml: services.filebrowser.username
 # Password from .env: FILEBROWSER_PASSWORD
@@ -89,15 +91,20 @@ fi
 
 # ── Resolve drive roles ────────────────────────────────────────────────────────
 primary_mp=""
-backup_mp=""
+declare -a backup_mps=()
+declare -a backup_drv_names=()
 n_drives=$(config_len '.drives')
 for i in $(seq 0 $((n_drives - 1))); do
     drv_role=$(config_idx '.drives' "$i" '.role')
     drv_active=$(config_idx '.drives' "$i" '.active')
     [[ "$drv_active" == "false" ]] && continue
     drv_mp=$(config_idx '.drives' "$i" '.mountpoint')
+    drv_name=$(config_idx '.drives' "$i" '.name')
     [[ "$drv_role" == "main" ]]   && primary_mp="$drv_mp"
-    [[ "$drv_role" == "backup" ]] && backup_mp="$drv_mp"
+    if [[ "$drv_role" == "backup" ]]; then
+        backup_mps+=("$drv_mp")
+        backup_drv_names+=("$drv_name")
+    fi
 done
 
 [[ -n "$primary_mp" ]] || die "No active drive with role=main found in config."
@@ -112,27 +119,20 @@ for i in $(seq 0 $((n_shares - 1))); do
     [[ "$spath" == "${primary_mp}/"* ]] && _pshares["$sname"]=1
 done
 
-# Return a name that does not collide with any primary samba share.
+# Return a name that does not collide with any primary samba share or previously
+# assigned virtual folder name.
+declare -A _vnames_used=()
 _pick_safe_name() {
     local preferred="$1"
     local candidate="$preferred"
     local n=1
-    while [[ -n "${_pshares[$candidate]+x}" ]]; do
+    while [[ -n "${_pshares[$candidate]+x}" ]] || [[ -n "${_vnames_used[$candidate]+x}" ]]; do
         candidate="${preferred}_NAS${n}"
         (( n++ )) || true
     done
+    _vnames_used["$candidate"]=1
     echo "$candidate"
 }
-
-backup_vname=$(_pick_safe_name "Backup")
-trash_vname=$(_pick_safe_name  "Trash")
-
-if [[ "$backup_vname" != "Backup" ]]; then
-    log_warn "Primary drive has a share named 'Backup' — backup drive virtual folder will be '${backup_vname}'."
-fi
-if [[ "$trash_vname" != "Trash" ]]; then
-    log_warn "Primary drive has a share named 'Trash' — trash virtual folder will be '${trash_vname}'."
-fi
 
 # ── Build the virtual root with systemd bind-mount units ──────────────────────
 mkdir -p "$root"
@@ -181,10 +181,8 @@ WantedBy=filebrowser.service"
     bind_mount_units+=("$uname")
 }
 
-# Systemd unit names for the real drive mount points (used in After=).
+# Systemd unit name for the primary drive mount point (used in After=).
 primary_mount_unit="$(systemd-escape --path "$primary_mp").mount"
-backup_mount_unit=""
-[[ -n "$backup_mp" ]] && backup_mount_unit="$(systemd-escape --path "$backup_mp").mount"
 
 # One bind mount per primary-drive samba share.
 for i in $(seq 0 $((n_shares - 1))); do
@@ -194,24 +192,34 @@ for i in $(seq 0 $((n_shares - 1))); do
     _ensure_bind_mount "$spath" "${root}/${sname}" "$primary_mount_unit"
 done
 
-# Backup drive virtual folder.
-if [[ -n "$backup_mp" ]]; then
-    _ensure_bind_mount "$backup_mp" "${root}/${backup_vname}" "$backup_mount_unit"
+# One virtual folder per backup drive (+ one for its trash, if configured).
+n_jobs=$(config_len '.sync_jobs')
+for bi in "${!backup_mps[@]}"; do
+    bmp="${backup_mps[$bi]}"
+    bname="${backup_drv_names[$bi]}"
+    bunit="$(systemd-escape --path "$bmp").mount"
 
-    # Trash virtual folder — derive path from first sync job that uses trash.
+    # Virtual folder name: capitalize first char of drive name (backup_daily → Backup_daily).
+    backup_vname=$(_pick_safe_name "${bname^}")
+    if [[ "$backup_vname" != "${bname^}" ]]; then
+        log_warn "Virtual name collision for drive '${bname}' — using '${backup_vname}'."
+    fi
+    _ensure_bind_mount "$bmp" "${root}/${backup_vname}" "$bunit"
+
+    # Trash virtual folder — find the first sync job whose trash lives under this drive.
     trash_path=""
-    n_jobs=$(config_len '.sync_jobs')
     for j in $(seq 0 $((n_jobs - 1))); do
         tp=$(config_idx '.sync_jobs' "$j" '.trash.path')
-        [[ -n "$tp" ]] && { trash_path="$tp"; break; }
+        [[ -n "$tp" && "$tp" == "${bmp}/"* ]] && { trash_path="$tp"; break; }
     done
 
-    if [[ -n "$trash_path" && "$trash_path" != "$backup_mp" ]]; then
-        # Ensure the trash directory exists on the backup drive.
+    if [[ -n "$trash_path" ]]; then
+        # Derive trash vname by replacing the "Backup" prefix with "Trash".
+        trash_vname=$(_pick_safe_name "${backup_vname/Backup/Trash}")
         mkdir -p "$trash_path"
-        _ensure_bind_mount "$trash_path" "${root}/${trash_vname}" "$backup_mount_unit"
+        _ensure_bind_mount "$trash_path" "${root}/${trash_vname}" "$bunit"
     fi
-fi
+done
 
 # ── Remove stale bind-mount units ─────────────────────────────────────────────
 # Any <root-escaped>-*.mount left over from a previous run (e.g. after a share
@@ -331,9 +339,3 @@ fi
 log_ok "Filebrowser running on port ${port}."
 log_ok "Access at: http://$(hostname -I | awk '{print $1}'):${port}"
 log_ok "Virtual root: ${root}"
-if [[ "$backup_vname" != "Backup" ]]; then
-    log_info "  Backup drive → '${backup_vname}/' (collision with primary share 'Backup')"
-fi
-if [[ "$trash_vname" != "Trash" ]]; then
-    log_info "  Trash        → '${trash_vname}/'  (collision with primary share 'Trash')"
-fi

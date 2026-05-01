@@ -120,7 +120,13 @@ for i in $(seq 0 $((n - 1))); do
     [[ -n "$trash_path" ]] || continue
 
     # Find the mountpoint that owns this trash path.
-    trash_mount=$(findmnt --target "$trash_path" --output TARGET --noheadings --first-only 2>/dev/null || true)
+    # Walk up to the nearest existing ancestor: findmnt requires the path to
+    # exist on this platform and won't resolve non-existent paths like .trash.
+    _trash_lookup="$trash_path"
+    while [[ -n "$_trash_lookup" && "$_trash_lookup" != "/" && ! -e "$_trash_lookup" ]]; do
+        _trash_lookup="$(dirname "$_trash_lookup")"
+    done
+    trash_mount=$(findmnt --target "$_trash_lookup" --output TARGET --noheadings --first-only 2>/dev/null || true)
     if [[ -z "$trash_mount" ]]; then
         log_info "  Trash dir '${trash_path}': drive not mounted — skipping."
         continue
