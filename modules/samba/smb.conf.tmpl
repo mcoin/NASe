@@ -24,6 +24,15 @@
    max log size = 10240
    logging = file
 
+   # macOS / iOS compatibility (SMB2/3 + Apple metadata)
+   vfs objects = fruit streams_xattr
+   fruit:metadata = stream
+   fruit:model = MacSamba
+   fruit:posix_rename = yes
+   fruit:veto_appledouble = yes
+   fruit:wipe_intentionally_left_blank_rfork = yes
+   fruit:delete_empty_adfiles = yes
+
    # Do not share printers
    load printers = no
    printing = bsd

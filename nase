@@ -346,6 +346,89 @@ cmd_web_restart() {
     log_ok "nase-web.service restarted."
 }
 
+# ── apply ─────────────────────────────────────────────────────────────────────
+
+_apply_preflight() {
+    preflight_checks
+    set -a
+    # shellcheck disable=SC1091
+    source "${REPO_ROOT}/.env"
+    set +a
+    "${REPO_ROOT}/tests/validate-config.sh"
+    check_drive_uuids
+}
+
+_run_module() {
+    local module="$1"
+    log_section "$module"
+    bash "${REPO_ROOT}/modules/${module}/setup.sh"
+}
+
+cmd_apply() {
+    local section="${1:-}"
+    case "$section" in
+        ""|all)
+            exec "${REPO_ROOT}/apply.sh"
+            ;;
+        nas|general)
+            _apply_preflight
+            log_section "nas"
+            local hostname
+            hostname=$(config_get '.nas.hostname')
+            if [[ -n "$hostname" ]]; then
+                log_info "Setting hostname to '${hostname}'..."
+                hostnamectl set-hostname "$hostname"
+                log_ok "Hostname set to '${hostname}'."
+            fi
+            ;;
+        drives)
+            _apply_preflight
+            _run_module drives
+            ;;
+        samba)
+            _apply_preflight
+            log_info "Prerequisite: drives"
+            _run_module drives
+            _run_module samba
+            ;;
+        sync|sync_jobs)
+            _apply_preflight
+            log_info "Prerequisite: drives"
+            _run_module drives
+            _run_module sync
+            ;;
+        services)
+            _apply_preflight
+            local need_drives=false
+            config_bool '.services.filebrowser.enabled' 2>/dev/null && need_drives=true
+            if [[ "$need_drives" == "true" ]]; then
+                log_info "Prerequisite: drives (required by filebrowser)"
+                _run_module drives
+            fi
+            config_bool '.services.web.enabled' 2>/dev/null && _run_module web
+            config_bool '.services.filebrowser.enabled' 2>/dev/null && _run_module filebrowser
+            ;;
+        tailscale)
+            _apply_preflight
+            if config_bool '.tailscale.enabled' 2>/dev/null; then
+                _run_module tailscale
+            else
+                log_info "Tailscale is disabled in config — nothing to apply."
+            fi
+            ;;
+        notifications)
+            _apply_preflight
+            log_section "notifications"
+            log_ok "Notifications config is read at runtime by sync jobs — no service to restart."
+            ;;
+        *)
+            log_error "Unknown section: '${section}'"
+            log_info "Valid sections: nas, drives, samba, sync, services, tailscale, notifications"
+            exit 1
+            ;;
+    esac
+}
+
 # ── notify-test ───────────────────────────────────────────────────────────────
 
 cmd_notify_test() {
@@ -380,12 +463,24 @@ ${_C_BOLD}Commands:${_C_RST}
   web-restart             Restart the web dashboard service
   notify-test             Send a test notification via the configured method
 
+  apply [<section>]       Apply config to a specific module (or all if omitted)
+    nas                     Set hostname
+    drives                  Mount units and spindown rules
+    samba                   Samba shares and users     [prereq: drives]
+    sync                    Sync job timers            [prereq: drives]
+    services                Web dashboard + filebrowser [prereq: drives]
+    tailscale               Tailscale VPN
+    notifications           Validate only (config read at runtime)
+
 ${_C_BOLD}Examples:${_C_RST}
   nase status
   sudo nase pause
   sudo nase sync music-backup
   nase logs
   nase logs -f music-backup
+  sudo nase apply
+  sudo nase apply samba
+  sudo nase apply services
 
 EOF
 }
@@ -405,6 +500,7 @@ case "$CMD" in
     logs)        cmd_logs "$@" ;;
     web-restart) check_root; cmd_web_restart ;;
     notify-test) check_root; cmd_notify_test ;;
+    apply)       check_root; cmd_apply "$@" ;;
     help|--help|-h|"") usage ;;
     *) log_error "Unknown command: '${CMD}'"; usage; exit 1 ;;
 esac
