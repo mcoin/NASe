@@ -51,6 +51,7 @@ After=network.target
 [Service]
 Type=simple
 Environment=REPO_ROOT=${REPO_ROOT}
+EnvironmentFile=-${REPO_ROOT}/.env
 ExecStart=${VENV_DIR}/bin/uvicorn main:app --host 0.0.0.0 --port ${port}
 WorkingDirectory=${APP_DIR}
 Restart=on-failure

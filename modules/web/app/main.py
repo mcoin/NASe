@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import os
+import secrets
 import subprocess
 from datetime import datetime
 from pathlib import Path
 
 import yaml
-from fastapi import FastAPI, Query, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from ruamel.yaml import YAML as RuamelYAML
@@ -23,7 +25,25 @@ STAMP_DIR   = Path("/var/lib/nase")
 LOG_DIR     = Path("/var/log/nase")
 CENTRAL_LOG = LOG_DIR / "nase.log"
 
-app = FastAPI(title="NASe Dashboard")
+# ── Auth ───────────────────────────────────────────────────────────────────────
+_WEB_USERNAME = os.environ.get("WEB_USERNAME", "nase")
+_WEB_PASSWORD = os.environ.get("WEB_PASSWORD", "")
+_http_basic   = HTTPBasic(realm="NASe")
+
+def _require_auth(credentials: HTTPBasicCredentials = Depends(_http_basic)):
+    if not _WEB_PASSWORD:
+        raise HTTPException(status_code=401,
+                            detail="WEB_PASSWORD not set in .env",
+                            headers={"WWW-Authenticate": 'Basic realm="NASe"'})
+    ok = (
+        secrets.compare_digest(credentials.username.encode(), _WEB_USERNAME.encode())
+        and secrets.compare_digest(credentials.password.encode(), _WEB_PASSWORD.encode())
+    )
+    if not ok:
+        raise HTTPException(status_code=401,
+                            headers={"WWW-Authenticate": 'Basic realm="NASe"'})
+
+app = FastAPI(title="NASe Dashboard", dependencies=[Depends(_require_auth)])
 app.mount("/static", StaticFiles(directory=str(APP_DIR / "static")), name="static")
 templates = Jinja2Templates(directory=str(APP_DIR / "templates"))
 
