@@ -43,9 +43,12 @@ def _require_auth(credentials: HTTPBasicCredentials = Depends(_http_basic)):
         raise HTTPException(status_code=401,
                             headers={"WWW-Authenticate": 'Basic realm="NASe"'})
 
-app = FastAPI(title="NASe Dashboard", dependencies=[Depends(_require_auth)])
+app = FastAPI(title="NASe Dashboard")
 app.mount("/static", StaticFiles(directory=str(APP_DIR / "static")), name="static")
 templates = Jinja2Templates(directory=str(APP_DIR / "templates"))
+
+# Router whose routes all require authentication (config editing + apply).
+_protected = APIRouter(dependencies=[Depends(_require_auth)])
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 def load_config() -> dict:
@@ -239,7 +242,7 @@ async def partial_logs(request: Request, job: str | None = Query(None)):
         "log_lines": read_log(job),
     })
 
-@app.get("/config", response_class=HTMLResponse)
+@_protected.get("/config", response_class=HTMLResponse)
 async def config_page(request: Request, tab: str = Query("nas")):
     cfg        = load_config()
     active_tab = tab if tab in _SECTION_KEYS else "nas"
@@ -252,7 +255,7 @@ async def config_page(request: Request, tab: str = Query("nas")):
         "active_tab":   active_tab,
     })
 
-@app.post("/config/{section}", response_class=HTMLResponse)
+@_protected.post("/config/{section}", response_class=HTMLResponse)
 async def save_config_section(request: Request, section: str):
     def _err(msg: str):
         return templates.TemplateResponse(request, "partials/save_result.html",
@@ -318,13 +321,13 @@ def _stream_cmd(*cmd: str) -> StreamingResponse:
     return StreamingResponse(_stream(), media_type="text/event-stream", headers=_SSE_HEADERS)
 
 
-@app.get("/apply")
+@_protected.get("/apply")
 async def apply_all():
     """Stream apply.sh output as Server-Sent Events."""
     return _stream_cmd(str(REPO_ROOT / "apply.sh"))
 
 
-@app.get("/apply/{section}")
+@_protected.get("/apply/{section}")
 async def apply_section(section: str):
     """Stream `nase apply <section>` output as Server-Sent Events."""
     if section not in _SECTION_APPLY_ARG:
@@ -333,3 +336,5 @@ async def apply_section(section: str):
             yield "event: done\ndata: 1\n\n"
         return StreamingResponse(_err(), media_type="text/event-stream", headers=_SSE_HEADERS)
     return _stream_cmd(str(REPO_ROOT / "nase"), "apply", _SECTION_APPLY_ARG[section])
+
+app.include_router(_protected)
