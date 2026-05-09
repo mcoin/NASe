@@ -260,34 +260,56 @@ async def save_config_section(request: Request, section: str):
 
 # ── Apply ──────────────────────────────────────────────────────────────────────
 _apply_lock = asyncio.Lock()
+_SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
 
-@app.get("/apply")
-async def apply_config():
-    """Stream apply.sh output as Server-Sent Events."""
+# Maps config section key → nase apply subcommand argument
+_SECTION_APPLY_ARG: dict[str, str] = {
+    "nas":           "nas",
+    "drives":        "drives",
+    "samba":         "samba",
+    "sync_jobs":     "sync",
+    "services":      "services",
+    "tailscale":     "tailscale",
+    "notifications": "notifications",
+}
+
+def _stream_cmd(*cmd: str) -> StreamingResponse:
+    """Return an SSE StreamingResponse that streams *cmd* stdout under the apply lock."""
     if _apply_lock.locked():
         async def _busy():
             yield "data: [apply already running]\n\n"
             yield "event: done\ndata: 1\n\n"
-        return StreamingResponse(_busy(), media_type="text/event-stream",
-                                 headers={"Cache-Control": "no-cache",
-                                          "X-Accel-Buffering": "no"})
+        return StreamingResponse(_busy(), media_type="text/event-stream", headers=_SSE_HEADERS)
 
     async def _stream():
         async with _apply_lock:
             proc = await asyncio.create_subprocess_exec(
-                str(REPO_ROOT / "apply.sh"),
+                *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
                 cwd=str(REPO_ROOT),
             )
             async for raw in proc.stdout:
-                line = raw.decode(errors="replace").rstrip("\n")
-                # Escape SSE special chars (newlines inside data field)
-                line = line.replace("\n", " ")
+                line = raw.decode(errors="replace").rstrip("\n").replace("\n", " ")
                 yield f"data: {line}\n\n"
             await proc.wait()
             yield f"event: done\ndata: {proc.returncode}\n\n"
 
-    return StreamingResponse(_stream(), media_type="text/event-stream",
-                             headers={"Cache-Control": "no-cache",
-                                      "X-Accel-Buffering": "no"})
+    return StreamingResponse(_stream(), media_type="text/event-stream", headers=_SSE_HEADERS)
+
+
+@app.get("/apply")
+async def apply_all():
+    """Stream apply.sh output as Server-Sent Events."""
+    return _stream_cmd(str(REPO_ROOT / "apply.sh"))
+
+
+@app.get("/apply/{section}")
+async def apply_section(section: str):
+    """Stream `nase apply <section>` output as Server-Sent Events."""
+    if section not in _SECTION_APPLY_ARG:
+        async def _err():
+            yield f"data: Unknown section '{section}'\n\n"
+            yield "event: done\ndata: 1\n\n"
+        return StreamingResponse(_err(), media_type="text/event-stream", headers=_SSE_HEADERS)
+    return _stream_cmd(str(REPO_ROOT / "nase"), "apply", _SECTION_APPLY_ARG[section])

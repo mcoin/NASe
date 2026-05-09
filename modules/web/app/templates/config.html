@@ -22,6 +22,7 @@
       </div>
       <div class="editor-footer">
         <button type="submit" class="btn-save">Save {{ label }}</button>
+        <button type="button" class="btn-apply" onclick="runApply('{{ key }}')">Apply {{ label }}</button>
         <span id="save-result-{{ key }}" class="save-result"></span>
       </div>
     </form>
@@ -29,15 +30,15 @@
   {% endfor %}
 </div>
 
-<div class="card">
+<div class="card" id="apply-card">
   <div class="card-head">
     <span>Apply configuration</span>
     <span class="apply-status" id="apply-status"></span>
   </div>
   <div class="card-body">
     <div class="apply-toolbar">
-      <button id="apply-btn" class="btn-apply" onclick="runApply()">Run apply.sh</button>
-      <span class="apply-hint">Applies <code>config.yaml</code> to all modules and restarts affected services.</span>
+      <button id="apply-btn" class="btn-apply" onclick="runApply()">Apply all</button>
+      <span class="apply-hint">Applies all sections to the live system. Use the per-section <strong>Apply</strong> buttons above to apply only what changed.</span>
     </div>
     <div id="apply-wrap" class="apply-wrap" style="display:none">
       <div id="apply-output" class="apply-panel"></div>
@@ -64,7 +65,8 @@
     return "log-info";
   }
 
-  function runApply() {
+  function runApply(section) {
+    var url    = section ? "/apply/" + section : "/apply";
     var btn    = document.getElementById("apply-btn");
     var out    = document.getElementById("apply-output");
     var wrap   = document.getElementById("apply-wrap");
@@ -75,8 +77,9 @@
     wrap.style.display = "block";
     status.textContent = "running…";
     status.className = "apply-status apply-status-running";
+    document.getElementById("apply-card").scrollIntoView({ behavior: "smooth", block: "nearest" });
 
-    var es = new EventSource("/apply");
+    var es = new EventSource(url);
 
     es.onmessage = function(e) {
       var div = document.createElement("div");
