@@ -21,6 +21,7 @@ run_suite() {
 run_suite "${REPO_ROOT}/tests/validate-config.sh"
 run_suite "${REPO_ROOT}/tests/test-config.sh"
 run_suite "${REPO_ROOT}/tests/test-sync-guards.sh"
+run_suite "${REPO_ROOT}/tests/integration/test-sync.sh"
 
 echo ""
 if [[ $OVERALL_FAIL -eq 0 ]]; then

@@ -64,18 +64,21 @@ fi
 #   2. The drive is unmounted but its directory exists on the SD card —
 #      in this case findmnt returns empty, which we also treat as unsafe.
 # Without this guard, rsync --delete on an empty source would wipe the backup.
-root_dev=$(get_mount_device /)
-is_safe_mount_path "Sync job '${JOB_NAME}': source" "$source_path" "$root_dev" \
-    || exit 0
-is_safe_mount_path "Sync job '${JOB_NAME}': destination" "$dest_parent" "$root_dev" \
-    || exit 0
+# Set NASE_SKIP_MOUNT_GUARDS=1 to bypass (integration tests only).
+if [[ "${NASE_SKIP_MOUNT_GUARDS:-}" != "1" ]]; then
+    root_dev=$(get_mount_device /)
+    is_safe_mount_path "Sync job '${JOB_NAME}': source" "$source_path" "$root_dev" \
+        || exit 0
+    is_safe_mount_path "Sync job '${JOB_NAME}': destination" "$dest_parent" "$root_dev" \
+        || exit 0
+fi
 
 # ── Skip if source is unchanged since last sync ───────────────────────────────
 # Avoids spinning up the backup drive when nothing has changed on the source.
 # Checked here, before any interaction with the destination drive.
 # The stamp file is touched after each successful rsync run.
 # On the first run (no stamp file), rsync always proceeds.
-STAMP_DIR="/var/lib/nase"
+STAMP_DIR="${NASE_STAMP_DIR:-/var/lib/nase}"
 STAMP_FILE="${STAMP_DIR}/sync-${JOB_NAME}.stamp"
 
 if [[ -f "$STAMP_FILE" ]]; then
@@ -137,7 +140,7 @@ START_TIME=$(date +%s)
 log_info "Starting sync job '${JOB_NAME}': ${source_path} → ${dest_path}"
 log_info "Flags: ${rsync_flags}${EXTRA_FLAGS:+ ${EXTRA_FLAGS}}"
 
-RSYNC_LOG="/var/log/nase-sync-${JOB_NAME}.log"
+RSYNC_LOG="${NASE_LOG_DIR:-/var/log}/nase-sync-${JOB_NAME}.log"
 # Temp file to capture per-file rsync output for central log.
 # Uses --out-format with a unique prefix (NXFR) to distinguish file entries
 # from rsync's stats summary lines which also go to stdout.

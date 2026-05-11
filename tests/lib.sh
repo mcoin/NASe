@@ -52,6 +52,42 @@ assert_exit1() {
     fi
 }
 
+# assert_file_exists DESCRIPTION PATH
+assert_file_exists() {
+    local desc="$1" path="$2"
+    if [[ -f "$path" ]]; then
+        echo "  PASS  $desc"
+        (( TESTS_PASS++ )) || true
+    else
+        echo "  FAIL  $desc — file not found: $path"
+        (( TESTS_FAIL++ )) || true
+    fi
+}
+
+# assert_file_absent DESCRIPTION PATH
+assert_file_absent() {
+    local desc="$1" path="$2"
+    if [[ ! -f "$path" ]]; then
+        echo "  PASS  $desc"
+        (( TESTS_PASS++ )) || true
+    else
+        echo "  FAIL  $desc — unexpected file: $path"
+        (( TESTS_FAIL++ )) || true
+    fi
+}
+
+# assert_dir_absent DESCRIPTION PATH
+assert_dir_absent() {
+    local desc="$1" path="$2"
+    if [[ ! -d "$path" ]]; then
+        echo "  PASS  $desc"
+        (( TESTS_PASS++ )) || true
+    else
+        echo "  FAIL  $desc — unexpected directory: $path"
+        (( TESTS_FAIL++ )) || true
+    fi
+}
+
 # skip DESCRIPTION REASON
 skip() {
     echo "  SKIP  $1 ($2)"
