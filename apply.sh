@@ -56,7 +56,7 @@ if mountpoint -q /mnt/primary 2>/dev/null; then
     _current_hash=$(sha256sum "${REPO_ROOT}/config.yaml" | cut -d' ' -f1)
     if [[ ! -f "${_NASE_ARCHIVE}/config.yaml" ]] \
             || [[ "$(sha256sum "${_NASE_ARCHIVE}/config.yaml" | cut -d' ' -f1)" != "$_current_hash" ]]; then
-        _ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+        _ts=$(date -u +%Y-%m-%dT%H-%M-%SZ)
         mkdir -p "${_NASE_ARCHIVE}/${_ts}"
         cp "${REPO_ROOT}/config.yaml" "${_NASE_ARCHIVE}/${_ts}/config.yaml"
         cp "${REPO_ROOT}/config.yaml" "${_NASE_ARCHIVE}/config.yaml"
