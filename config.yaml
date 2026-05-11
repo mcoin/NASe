@@ -129,6 +129,26 @@ tailscale:
 #                  Default: 7. Set to 0 to disable.
 # --------------------------------------------------------------------------
 sync_jobs:
+  # NASe config archive — mirrors the versioned config history to both backup
+  # drives. Trash is disabled; retention (90 days) is managed by apply.sh.
+  - name: nase-config-backup1
+    source: /mnt/primary/NASe/
+    dest: /mnt/backup_daily/NASe/
+    schedule: '*-*-* *:00/01:00'
+    rsync_flags: --archive --delete
+    on_failure: notify
+    force_sync_days: 1
+    trash:
+      enabled: false
+  - name: nase-config-backup2
+    source: /mnt/primary/NASe/
+    dest: /mnt/backup_weekly/NASe/
+    schedule: '*-*-* *:00/05:00'
+    rsync_flags: --archive --delete
+    on_failure: notify
+    force_sync_days: 1
+    trash:
+      enabled: false
   - name: music-backup1
     source: /mnt/primary/Music/
     dest: /mnt/backup_daily/Music/

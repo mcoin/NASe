@@ -47,6 +47,32 @@ run_module() {
 }
 
 run_module drives
+
+# ── Archive config.yaml to primary drive ─────────────────────────────────────
+log_section "Config archive"
+_NASE_ARCHIVE="/mnt/primary/NASe"
+if mountpoint -q /mnt/primary 2>/dev/null; then
+    mkdir -p "$_NASE_ARCHIVE"
+    _current_hash=$(sha256sum "${REPO_ROOT}/config.yaml" | cut -d' ' -f1)
+    if [[ ! -f "${_NASE_ARCHIVE}/config.yaml" ]] \
+            || [[ "$(sha256sum "${_NASE_ARCHIVE}/config.yaml" | cut -d' ' -f1)" != "$_current_hash" ]]; then
+        _ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+        mkdir -p "${_NASE_ARCHIVE}/${_ts}"
+        cp "${REPO_ROOT}/config.yaml" "${_NASE_ARCHIVE}/${_ts}/config.yaml"
+        cp "${REPO_ROOT}/config.yaml" "${_NASE_ARCHIVE}/config.yaml"
+        log_ok "Config archived → ${_NASE_ARCHIVE}/${_ts}/"
+    else
+        log_info "Config unchanged since last archive."
+    fi
+    # Prune history directories older than 90 days
+    while IFS= read -r _old; do
+        rm -rf "$_old"
+        log_info "Pruned old config version: $(basename "$_old")"
+    done < <(find "$_NASE_ARCHIVE" -maxdepth 1 -mindepth 1 -type d -mtime +90 2>/dev/null)
+else
+    log_warn "Primary drive not mounted — skipping config archive."
+fi
+
 run_module samba
 run_module sync
 
