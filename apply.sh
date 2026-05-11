@@ -62,6 +62,8 @@ if config_bool '.services.filebrowser.enabled'; then
     run_module filebrowser
 fi
 
+run_module watch
+
 # ── Install repo-provided systemd units ──────────────────────────────────────
 # Substitute __REPO_ROOT__ in unit files so they work regardless of clone path.
 log_section "Systemd units"

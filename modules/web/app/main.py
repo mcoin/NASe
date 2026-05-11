@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 
 import yaml
-from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
@@ -181,6 +181,7 @@ CONFIG_SECTIONS: list[tuple[str, str]] = [
     ("services",      "Services"),
     ("tailscale",     "Tailscale"),
     ("notifications", "Notifications"),
+    ("file_watch",    "File Watch"),
 ]
 _SECTION_KEYS = {k for k, _ in CONFIG_SECTIONS}
 
@@ -294,6 +295,7 @@ _SECTION_APPLY_ARG: dict[str, str] = {
     "services":      "services",
     "tailscale":     "tailscale",
     "notifications": "notifications",
+    "file_watch":    "watch",
 }
 
 def _stream_cmd(*cmd: str) -> StreamingResponse:

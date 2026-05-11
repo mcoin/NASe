@@ -421,9 +421,13 @@ cmd_apply() {
             log_section "notifications"
             log_ok "Notifications config is read at runtime by sync jobs — no service to restart."
             ;;
+        watch|file_watch)
+            _apply_preflight
+            _run_module watch
+            ;;
         *)
             log_error "Unknown section: '${section}'"
-            log_info "Valid sections: nas, drives, samba, sync, services, tailscale, notifications"
+            log_info "Valid sections: nas, drives, samba, sync, services, tailscale, notifications, watch"
             exit 1
             ;;
     esac

@@ -18,7 +18,8 @@
           hx-target="#save-result-{{ key }}"
           hx-swap="innerHTML">
       <div class="editor-wrap">
-        <textarea class="yaml-editor" name="yaml_text" spellcheck="false">{{ section_yaml[key] }}</textarea>
+        <textarea class="yaml-editor" name="yaml_text" spellcheck="false"
+                  oninput="document.getElementById('save-result-{{ key }}').innerHTML = ''">{{ section_yaml[key] }}</textarea>
       </div>
       <div class="editor-footer">
         <button type="submit" class="btn-save">Save {{ label }}</button>
