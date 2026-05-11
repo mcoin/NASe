@@ -83,6 +83,10 @@ samba:
       path: /mnt/primary/videos
       read_only: false
       valid_users: "nase"
+    - name: NASe
+      path: /mnt/primary/NASe
+      read_only: true
+      valid_users: "nase"
     - name: Backup_daily
       path: /mnt/backup_daily
       read_only: true
