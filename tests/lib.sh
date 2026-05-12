@@ -88,6 +88,33 @@ assert_dir_absent() {
     fi
 }
 
+# assert_contains DESCRIPTION NEEDLE HAYSTACK
+assert_contains() {
+    local desc="$1" needle="$2" haystack="$3"
+    if [[ "$haystack" == *"$needle"* ]]; then
+        echo "  PASS  $desc"
+        (( TESTS_PASS++ )) || true
+    else
+        echo "  FAIL  $desc"
+        echo "        expected to contain: $(printf '%q' "$needle")"
+        echo "        got: $(printf '%q' "$haystack")"
+        (( TESTS_FAIL++ )) || true
+    fi
+}
+
+# assert_not_contains DESCRIPTION NEEDLE HAYSTACK
+assert_not_contains() {
+    local desc="$1" needle="$2" haystack="$3"
+    if [[ "$haystack" != *"$needle"* ]]; then
+        echo "  PASS  $desc"
+        (( TESTS_PASS++ )) || true
+    else
+        echo "  FAIL  $desc"
+        echo "        expected NOT to contain: $(printf '%q' "$needle")"
+        (( TESTS_FAIL++ )) || true
+    fi
+}
+
 # skip DESCRIPTION REASON
 skip() {
     echo "  SKIP  $1 ($2)"

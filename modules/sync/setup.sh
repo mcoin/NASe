@@ -9,7 +9,7 @@ REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 source "${REPO_ROOT}/lib/log.sh"
 source "${REPO_ROOT}/lib/config.sh"
 
-SYSTEMD_DIR="/etc/systemd/system"
+SYSTEMD_DIR="${SYSTEMD_DIR:-/etc/systemd/system}"
 SYNC_SCRIPT="${REPO_ROOT}/modules/sync/sync.sh"
 UNIT_PREFIX="nase-sync-"
 

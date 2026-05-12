@@ -21,6 +21,9 @@ run_suite() {
 run_suite "${REPO_ROOT}/tests/validate-config.sh"
 run_suite "${REPO_ROOT}/tests/test-config.sh"
 run_suite "${REPO_ROOT}/tests/test-sync-guards.sh"
+run_suite "${REPO_ROOT}/tests/test-samba.sh"
+run_suite "${REPO_ROOT}/tests/test-sync-setup.sh"
+run_suite "${REPO_ROOT}/tests/test-notify.sh"
 run_suite "${REPO_ROOT}/tests/integration/test-sync.sh"
 run_suite "${REPO_ROOT}/tests/web/run.sh"
 
