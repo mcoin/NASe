@@ -85,6 +85,18 @@ log_section "Applying configuration"
 
 "${REPO_ROOT}/apply.sh"
 
+# ── Test dependencies ─────────────────────────────────────────────────────────
+log_section "Test dependencies"
+
+PYTHON="${REPO_ROOT}/modules/web/venv/bin/python"
+if [[ -x "$PYTHON" ]]; then
+    log_info "Installing pytest and httpx into web venv..."
+    "$PYTHON" -m pip install -q pytest httpx
+    log_ok "Test dependencies installed."
+else
+    log_info "Web venv not found — skipping test dependencies."
+fi
+
 log_section "Installation complete"
 log_ok "NASe is set up. Review the service status with:"
 log_ok "  systemctl status smbd nase-monitor.service"
