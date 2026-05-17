@@ -345,7 +345,7 @@
     var drives = [];
     var current = null;
     yaml.split("\n").forEach(function(line) {
-      var m = line.match(/^-\s+name:\s*(.*)/);
+      var m = line.match(/^\s*-\s+name:\s*(.*)/);
       if (m) {
         if (current) drives.push(current);
         current = { name: m[1].replace(/^["']|["']$/g, "").trim() };
