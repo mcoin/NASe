@@ -88,7 +88,6 @@
 
     es.addEventListener("done", function(e) {
       es.close();
-      btn.disabled = false;
       var code = parseInt(e.data, 10);
       var ts   = new Date().toLocaleTimeString();
       var msg  = document.createElement("div");
@@ -115,7 +114,6 @@
 
     es.onerror = function() {
       es.close();
-      btn.disabled = false;
       var msg = document.createElement("div");
       msg.className = "log-err";
       msg.textContent = "— connection error —";
