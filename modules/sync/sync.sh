@@ -105,17 +105,39 @@ if [[ -f "$STAMP_FILE" ]]; then
 fi
 
 # ── Remount destination read-write if needed ─────────────────────────────────
-# Find the mountpoint of the destination and check if it is mounted read-only.
+# Find the mountpoint of the destination and check its current and configured
+# mount state.
 dest_mount=$(findmnt --target "$dest_parent" --output TARGET --noheadings --first-only)
 [[ -n "$dest_mount" ]] || die "Could not determine mountpoint for '${dest_parent}'."
 
 dest_is_ro=$(findmnt --target "$dest_parent" --output OPTIONS --noheadings --first-only \
     | grep -qw ro && echo true || echo false)
 
+# Check whether the dest drive is configured as read_only in config.yaml.
+# We use this — not the live mount state — to decide whether to remount ro on
+# exit. This handles the case where a previous crashed sync left the drive rw:
+# the EXIT trap still fires and restores the correct state.
+dest_should_be_ro=false
+_n_drives=$(config_len '.drives')
+for _k in $(seq 0 $((_n_drives - 1))); do
+    _drive_mp=$(config_idx '.drives' "$_k" '.mountpoint')
+    _drive_ro=$(config_idx '.drives' "$_k" '.read_only')
+    if [[ "$_drive_mp" == "$dest_mount" && "$_drive_ro" == "true" ]]; then
+        dest_should_be_ro=true
+        break
+    fi
+done
+
 if [[ "$dest_is_ro" == "true" ]]; then
     log_info "Remounting ${dest_mount} read-write for sync..."
     mount -o remount,rw "$dest_mount"
-    # Ensure we remount read-only again when the script exits, even on failure
+elif [[ "$dest_should_be_ro" == "true" ]]; then
+    log_warn "${dest_mount} is mounted rw but is configured read_only — will remount ro after sync."
+fi
+
+# Install the remount-ro trap whenever the drive should end up ro,
+# regardless of whether we were the ones to flip it rw.
+if [[ "$dest_should_be_ro" == "true" ]]; then
     trap 'log_info "Remounting ${dest_mount} read-only..."; mount -o remount,ro "${dest_mount}"' EXIT
 fi
 
@@ -146,7 +168,7 @@ RSYNC_LOG="${NASE_LOG_DIR:-/var/log}/nase-sync-${JOB_NAME}.log"
 # from rsync's stats summary lines which also go to stdout.
 # Set up early so the EXIT trap can always clean it up.
 RSYNC_XFER_TMP=$(mktemp)
-if [[ "$dest_is_ro" == "true" ]]; then
+if [[ "$dest_should_be_ro" == "true" ]]; then
     # Override the earlier trap to include temp file cleanup alongside the remount
     trap 'rm -f "$RSYNC_XFER_TMP"; log_info "Remounting ${dest_mount} read-only..."; mount -o remount,ro "${dest_mount}"' EXIT
 else
