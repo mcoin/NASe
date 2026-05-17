@@ -137,7 +137,7 @@ sync_jobs:
   - name: nase-cfg-backup-daily
     source: /mnt/primary/NASe/
     dest: /mnt/backup_daily/NASe/
-    schedule: '*-*-* *:00/02:00'
+    schedule: '*-*-* *:00/05:00'
     rsync_flags: --archive --delete
     on_failure: notify
     force_sync_days: 1
@@ -146,7 +146,7 @@ sync_jobs:
   - name: nase-cfg-backup-weekly
     source: /mnt/primary/NASe/
     dest: /mnt/backup_weekly/NASe/
-    schedule: '*-*-* *:00/05:00'
+    schedule: '*-*-* *:00/10:00'
     rsync_flags: --archive --delete
     on_failure: notify
     force_sync_days: 1

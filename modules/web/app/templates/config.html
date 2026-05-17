@@ -18,7 +18,7 @@
           hx-target="#save-result-{{ key }}"
           hx-swap="innerHTML">
 
-      {% if key in ('nas', 'services') %}
+      {% if key in ('nas', 'services', 'tailscale', 'notifications') %}
       <div class="view-toggle-bar">
         <div class="view-toggle">
           <button type="button" class="vt-btn vt-active" id="vt-yaml-{{ key }}" onclick="switchView('{{ key }}','yaml')">YAML</button>
@@ -100,8 +100,66 @@
       </div>
       {% endif %}
 
+      {% if key == 'tailscale' %}
+      <div class="form-view" id="form-view-tailscale" style="display:none">
+        <div class="form-body">
+          <div class="form-row">
+            <label class="form-label" for="field-ts-enabled">Enabled</label>
+            <div class="form-field">
+              <input class="form-checkbox" type="checkbox" id="field-ts-enabled">
+              <span class="form-hint">Auth key is configured in .env (TAILSCALE_AUTHKEY).</span>
+            </div>
+          </div>
+          <div class="form-row">
+            <label class="form-label" for="field-ts-exit-node">Exit node</label>
+            <div class="form-field">
+              <input class="form-checkbox" type="checkbox" id="field-ts-exit-node">
+              <span class="form-hint">Route all client traffic through this node.</span>
+            </div>
+          </div>
+          <div class="form-row">
+            <label class="form-label" for="field-ts-routes">Advertise routes</label>
+            <div class="form-field">
+              <input class="form-input" type="text" id="field-ts-routes" placeholder="e.g. 192.168.1.0/24">
+              <span class="form-hint">Subnet CIDR to advertise to other Tailscale nodes. Leave empty to disable.</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+
+      {% if key == 'notifications' %}
+      <div class="form-view" id="form-view-notifications" style="display:none">
+        <div class="form-body">
+          <div class="form-row">
+            <label class="form-label" for="field-notif-method">Method</label>
+            <div class="form-field">
+              <select class="form-input form-select" id="field-notif-method" onchange="_toggleNotifFields()">
+                <option value="none">None</option>
+                <option value="email">Email</option>
+                <option value="webhook">Webhook</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row" id="notif-email-row" style="display:none">
+            <label class="form-label" for="field-notif-email">Recipient</label>
+            <div class="form-field">
+              <input class="form-input" type="email" id="field-notif-email">
+              <span class="form-hint">SMTP credentials (host, port, user, password) are set in .env.</span>
+            </div>
+          </div>
+          <div class="form-row" id="notif-webhook-row" style="display:none">
+            <label class="form-label"></label>
+            <div class="form-field">
+              <span class="form-hint">Webhook URL is set via NOTIFY_WEBHOOK_URL in .env.</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+
       <div class="editor-footer">
-        {% if key in ('nas', 'services') %}
+        {% if key in ('nas', 'services', 'tailscale', 'notifications') %}
         <button type="submit" class="btn-save" onclick="beforeSave('{{ key }}')">Save {{ label }}</button>
         {% else %}
         <button type="submit" class="btn-save">Save {{ label }}</button>
@@ -167,13 +225,14 @@
 
   // ── Populate form from YAML ──────────────────────────────────────────────
   function populateForm(key, yaml) {
+    var d = _parseFlat(yaml);
+
     if (key === "nas") {
-      var m = yaml.match(/hostname:\s*(\S+)/);
-      _setVal("field-nas-hostname", m ? m[1] : "");
+      _setVal("field-nas-hostname", d.hostname || "");
 
     } else if (key === "services") {
       var lines = yaml.split("\n"), ctx = null;
-      var d = { web: {}, filebrowser: {} };
+      var sd = { web: {}, filebrowser: {} };
       lines.forEach(function(line) {
         var t = line.trim();
         if (t === "web:")         { ctx = "web";         return; }
@@ -181,15 +240,25 @@
         if (!ctx) return;
         var kv = t.match(/^(\w+):\s*(.*)/);
         if (!kv) return;
-        d[ctx][kv[1]] = kv[2].replace(/^["']|["']$/g, "");
+        sd[ctx][kv[1]] = kv[2].replace(/^["']|["']$/g, "");
       });
-      _setCheck("field-svc-web-enabled", d.web.enabled !== "false");
-      _setVal("field-svc-web-port",      d.web.port || "");
-      _setCheck("field-svc-fb-enabled",  d.filebrowser.enabled !== "false");
-      _setVal("field-svc-fb-port",       d.filebrowser.port || "");
-      _setVal("field-svc-fb-root",       d.filebrowser.root || "/srv/filebrowser");
-      _setVal("field-svc-fb-username",   d.filebrowser.username || "");
-      _setVal("field-svc-fb-baseurl",    d.filebrowser.base_url || "");
+      _setCheck("field-svc-web-enabled", sd.web.enabled !== "false");
+      _setVal("field-svc-web-port",      sd.web.port || "");
+      _setCheck("field-svc-fb-enabled",  sd.filebrowser.enabled !== "false");
+      _setVal("field-svc-fb-port",       sd.filebrowser.port || "");
+      _setVal("field-svc-fb-root",       sd.filebrowser.root || "/srv/filebrowser");
+      _setVal("field-svc-fb-username",   sd.filebrowser.username || "");
+      _setVal("field-svc-fb-baseurl",    sd.filebrowser.base_url || "");
+
+    } else if (key === "tailscale") {
+      _setCheck("field-ts-enabled",   d.enabled !== "false");
+      _setCheck("field-ts-exit-node", d.advertise_exit_node === "true");
+      _setVal("field-ts-routes",      d.advertise_routes || "");
+
+    } else if (key === "notifications") {
+      _setVal("field-notif-method", d.method || "none");
+      _setVal("field-notif-email",  d.email  || "");
+      _toggleNotifFields();
     }
   }
 
@@ -215,16 +284,46 @@
            + "  root: "     + fbRoot    + "\n"
            + "  username: " + fbUser    + "\n"
            + '  base_url: "' + fbBase   + '"\n';
+
+    } else if (key === "tailscale") {
+      var tsEnabled = document.getElementById("field-ts-enabled").checked;
+      var tsExit    = document.getElementById("field-ts-exit-node").checked;
+      var tsRoutes  = document.getElementById("field-ts-routes").value.trim();
+      return "enabled: "             + tsEnabled + "\n"
+           + "advertise_exit_node: " + tsExit    + "\n"
+           + 'advertise_routes: "'   + tsRoutes  + '"\n';
+
+    } else if (key === "notifications") {
+      var method = document.getElementById("field-notif-method").value;
+      var email  = document.getElementById("field-notif-email").value.trim();
+      return "method: " + method + "\n"
+           + "email: "  + email  + "\n";
     }
   }
 
+  // ── Notifications: show/hide conditional fields ──────────────────────────
+  function _toggleNotifFields() {
+    var method = document.getElementById("field-notif-method").value;
+    document.getElementById("notif-email-row").style.display   = method === "email"   ? "" : "none";
+    document.getElementById("notif-webhook-row").style.display = method === "webhook" ? "" : "none";
+  }
+
   // ── Helpers ──────────────────────────────────────────────────────────────
+  function _parseFlat(yaml) {
+    var d = {};
+    yaml.split("\n").forEach(function(line) {
+      var kv = line.trim().match(/^(\w+):\s*(.*)/);
+      if (kv) d[kv[1]] = kv[2].replace(/^["']|["']$/g, "");
+    });
+    return d;
+  }
+
   function _setVal(id, val)   { document.getElementById(id).value   = val; }
   function _setCheck(id, val) { document.getElementById(id).checked = !!val; }
 
   // Clear save banner on any input inside a form view
   document.addEventListener("DOMContentLoaded", function() {
-    ["nas", "services"].forEach(function(key) {
+    ["nas", "services", "tailscale", "notifications"].forEach(function(key) {
       var fv = document.getElementById("form-view-" + key);
       if (fv) fv.addEventListener("input", function() {
         document.getElementById("save-result-" + key).innerHTML = "";
