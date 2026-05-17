@@ -67,17 +67,19 @@
   }
 
   function runApply(section) {
-    var url    = section ? "/apply/" + section : "/apply";
-    var btn    = document.getElementById("apply-btn");
-    var out    = document.getElementById("apply-output");
-    var wrap   = document.getElementById("apply-wrap");
-    var status = document.getElementById("apply-status");
+    var url        = section ? "/apply/" + section : "/apply";
+    var btn        = document.getElementById("apply-btn");
+    var out        = document.getElementById("apply-output");
+    var wrap       = document.getElementById("apply-wrap");
+    var status     = document.getElementById("apply-status");
+    var saveResult = section ? document.getElementById("save-result-" + section) : null;
 
     btn.disabled = true;
     out.innerHTML = "";
     wrap.style.display = "block";
     status.textContent = "running…";
     status.className = "apply-status apply-status-running";
+    if (saveResult) { saveResult.innerHTML = ""; }
     document.getElementById("apply-card").scrollIntoView({ behavior: "smooth", block: "nearest" });
 
     var es = new EventSource(url);
@@ -94,17 +96,26 @@
       es.close();
       btn.disabled = false;
       var code = parseInt(e.data, 10);
-      var msg = document.createElement("div");
+      var ts   = new Date().toLocaleTimeString();
+      var msg  = document.createElement("div");
       if (code === 0) {
         msg.className = "log-ok";
         msg.textContent = "— apply finished successfully —";
         status.textContent = "ok";
         status.className = "apply-status apply-status-ok";
+        if (saveResult) {
+          saveResult.innerHTML = '<span class="save-ok">&#10003; Applied at ' + ts + '</span>';
+        } else {
+          document.querySelectorAll('[id^="save-result-"]').forEach(function(el) { el.innerHTML = ""; });
+        }
       } else {
         msg.className = "log-err";
         msg.textContent = "— apply failed (exit " + code + ") —";
         status.textContent = "failed";
         status.className = "apply-status apply-status-err";
+        if (saveResult) {
+          saveResult.innerHTML = '<span class="save-err">&#10007; Apply failed at ' + ts + '</span>';
+        }
       }
       out.appendChild(msg);
       out.scrollTop = out.scrollHeight;
