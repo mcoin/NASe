@@ -18,11 +18,11 @@
           hx-target="#save-result-{{ key }}"
           hx-swap="innerHTML">
 
-      {% if key == 'nas' %}
+      {% if key in ('nas', 'services') %}
       <div class="view-toggle-bar">
         <div class="view-toggle">
-          <button type="button" class="vt-btn vt-active" id="vt-yaml-nas" onclick="switchView('nas','yaml')">YAML</button>
-          <button type="button" class="vt-btn" id="vt-form-nas" onclick="switchView('nas','form')">Form</button>
+          <button type="button" class="vt-btn vt-active" id="vt-yaml-{{ key }}" onclick="switchView('{{ key }}','yaml')">YAML</button>
+          <button type="button" class="vt-btn" id="vt-form-{{ key }}" onclick="switchView('{{ key }}','form')">Form</button>
         </div>
       </div>
       {% endif %}
@@ -38,8 +38,7 @@
           <div class="form-row">
             <label class="form-label" for="field-nas-hostname">Hostname</label>
             <div class="form-field">
-              <input class="form-input" id="field-nas-hostname" type="text"
-                     oninput="document.getElementById('save-result-nas').innerHTML = ''">
+              <input class="form-input" id="field-nas-hostname" type="text">
               <span class="form-hint">The hostname this Pi uses on the local network.</span>
             </div>
           </div>
@@ -47,9 +46,59 @@
       </div>
       {% endif %}
 
+      {% if key == 'services' %}
+      <div class="form-view" id="form-view-services" style="display:none">
+        <input type="hidden" id="field-svc-fb-root">
+        <div class="form-body">
+
+          <p class="form-section-head">Web Dashboard</p>
+          <div class="form-row">
+            <label class="form-label" for="field-svc-web-enabled">Enabled</label>
+            <div class="form-field">
+              <input class="form-checkbox" type="checkbox" id="field-svc-web-enabled">
+            </div>
+          </div>
+          <div class="form-row">
+            <label class="form-label" for="field-svc-web-port">Port</label>
+            <div class="form-field">
+              <input class="form-input form-input-sm" type="number" id="field-svc-web-port" min="1" max="65535">
+            </div>
+          </div>
+
+          <p class="form-section-head">File Browser</p>
+          <div class="form-row">
+            <label class="form-label" for="field-svc-fb-enabled">Enabled</label>
+            <div class="form-field">
+              <input class="form-checkbox" type="checkbox" id="field-svc-fb-enabled">
+            </div>
+          </div>
+          <div class="form-row">
+            <label class="form-label" for="field-svc-fb-port">Port</label>
+            <div class="form-field">
+              <input class="form-input form-input-sm" type="number" id="field-svc-fb-port" min="1" max="65535">
+            </div>
+          </div>
+          <div class="form-row">
+            <label class="form-label" for="field-svc-fb-username">Username</label>
+            <div class="form-field">
+              <input class="form-input" type="text" id="field-svc-fb-username">
+            </div>
+          </div>
+          <div class="form-row">
+            <label class="form-label" for="field-svc-fb-baseurl">Base URL</label>
+            <div class="form-field">
+              <input class="form-input" type="text" id="field-svc-fb-baseurl" placeholder="(empty for direct access)">
+              <span class="form-hint">Set only if served behind a reverse proxy, e.g. /files.</span>
+            </div>
+          </div>
+
+        </div>
+      </div>
+      {% endif %}
+
       <div class="editor-footer">
-        {% if key == 'nas' %}
-        <button type="submit" class="btn-save" onclick="beforeSaveNas()">Save {{ label }}</button>
+        {% if key in ('nas', 'services') %}
+        <button type="submit" class="btn-save" onclick="beforeSave('{{ key }}')">Save {{ label }}</button>
         {% else %}
         <button type="submit" class="btn-save">Save {{ label }}</button>
         {% endif %}
@@ -77,6 +126,7 @@
 
 {% block scripts %}
 <script>
+  // ── Tab switching ────────────────────────────────────────────────────────
   function switchTab(key) {
     document.querySelectorAll(".tab-panel").forEach(function(p) { p.classList.remove("active"); });
     document.querySelectorAll(".tab-btn").forEach(function(b) { b.classList.remove("active"); });
@@ -84,6 +134,7 @@
     document.querySelector('[data-tab="' + key + '"]').classList.add("active");
   }
 
+  // ── YAML / Form view toggle ──────────────────────────────────────────────
   function switchView(key, mode) {
     var yamlWrap = document.getElementById("yaml-view-" + key);
     var formView = document.getElementById("form-view-" + key);
@@ -103,26 +154,81 @@
     }
   }
 
+  function beforeSave(key) {
+    var formView = document.getElementById("form-view-" + key);
+    if (formView && formView.style.display !== "none") {
+      document.querySelector("#yaml-view-" + key + " textarea").value = marshalForm(key);
+    }
+  }
+
+  // ── Populate form from YAML ──────────────────────────────────────────────
   function populateForm(key, yaml) {
     if (key === "nas") {
       var m = yaml.match(/hostname:\s*(\S+)/);
-      document.getElementById("field-nas-hostname").value = m ? m[1] : "";
+      _setVal("field-nas-hostname", m ? m[1] : "");
+
+    } else if (key === "services") {
+      var lines = yaml.split("\n"), ctx = null;
+      var d = { web: {}, filebrowser: {} };
+      lines.forEach(function(line) {
+        var t = line.trim();
+        if (t === "web:")         { ctx = "web";         return; }
+        if (t === "filebrowser:") { ctx = "filebrowser"; return; }
+        if (!ctx) return;
+        var kv = t.match(/^(\w+):\s*(.*)/);
+        if (!kv) return;
+        d[ctx][kv[1]] = kv[2].replace(/^["']|["']$/g, "");
+      });
+      _setCheck("field-svc-web-enabled", d.web.enabled !== "false");
+      _setVal("field-svc-web-port",      d.web.port || "");
+      _setCheck("field-svc-fb-enabled",  d.filebrowser.enabled !== "false");
+      _setVal("field-svc-fb-port",       d.filebrowser.port || "");
+      _setVal("field-svc-fb-root",       d.filebrowser.root || "/srv/filebrowser");
+      _setVal("field-svc-fb-username",   d.filebrowser.username || "");
+      _setVal("field-svc-fb-baseurl",    d.filebrowser.base_url || "");
     }
   }
 
+  // ── Marshal form back to YAML ────────────────────────────────────────────
   function marshalForm(key) {
     if (key === "nas") {
       return "hostname: " + document.getElementById("field-nas-hostname").value.trim() + "\n";
+
+    } else if (key === "services") {
+      var webEnabled = document.getElementById("field-svc-web-enabled").checked;
+      var webPort    = document.getElementById("field-svc-web-port").value.trim();
+      var fbEnabled  = document.getElementById("field-svc-fb-enabled").checked;
+      var fbPort     = document.getElementById("field-svc-fb-port").value.trim();
+      var fbRoot     = document.getElementById("field-svc-fb-root").value || "/srv/filebrowser";
+      var fbUser     = document.getElementById("field-svc-fb-username").value.trim();
+      var fbBase     = document.getElementById("field-svc-fb-baseurl").value.trim();
+      return "web:\n"
+           + "  enabled: " + webEnabled + "\n"
+           + "  port: "    + webPort    + "\n\n"
+           + "filebrowser:\n"
+           + "  enabled: "  + fbEnabled + "\n"
+           + "  port: "     + fbPort    + "\n"
+           + "  root: "     + fbRoot    + "\n"
+           + "  username: " + fbUser    + "\n"
+           + '  base_url: "' + fbBase   + '"\n';
     }
   }
 
-  function beforeSaveNas() {
-    var formView = document.getElementById("form-view-nas");
-    if (formView && formView.style.display !== "none") {
-      document.querySelector("#yaml-view-nas textarea").value = marshalForm("nas");
-    }
-  }
+  // ── Helpers ──────────────────────────────────────────────────────────────
+  function _setVal(id, val)   { document.getElementById(id).value   = val; }
+  function _setCheck(id, val) { document.getElementById(id).checked = !!val; }
 
+  // Clear save banner on any input inside a form view
+  document.addEventListener("DOMContentLoaded", function() {
+    ["nas", "services"].forEach(function(key) {
+      var fv = document.getElementById("form-view-" + key);
+      if (fv) fv.addEventListener("input", function() {
+        document.getElementById("save-result-" + key).innerHTML = "";
+      });
+    });
+  });
+
+  // ── Apply output stream ──────────────────────────────────────────────────
   function applyClass(text) {
     if (text.includes("[OK   ]")) return "log-ok";
     if (text.includes("[WARN ]")) return "log-warn";

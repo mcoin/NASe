@@ -396,6 +396,27 @@ td.mono  { font-family: monospace; font-size: 0.8rem; color: var(--muted); }
   color: var(--muted);
 }
 
+.form-section-head {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid var(--border);
+  margin-top: 0.4rem;
+}
+
+.form-input-sm { max-width: 120px; }
+
+.form-checkbox {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: #2563eb;
+  margin-top: 0.35rem;
+}
+
 /* ── HTMX loading indicator ──────────────────────────────────────────────── */
 .htmx-indicator { opacity: 0; transition: opacity 0.2s; }
 .htmx-request .htmx-indicator { opacity: 1; }
