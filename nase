@@ -106,6 +106,31 @@ cmd_status() {
 
     printf "\n"
 
+    # ── Config archive timer ──────────────────────────────────────────────────
+    printf "${_C_BOLD}Config Archive${_C_RST}\n"
+    printf "  %-22s %-10s %-22s %s\n" "JOB" "STATUS" "NEXT TRIGGER" "LAST RUN"
+    printf "  %s\n" "────────────────────────────────────────────────────────────────────────────"
+
+    local ca_state ca_next_val ca_next_str ca_stamp_file ca_last_str
+    ca_state=$(_unit_state nase-config-archive.timer)
+    ca_next_val=$(systemctl show nase-config-archive.timer \
+        --property=NextElapseUSecRealtime --value 2>/dev/null || echo "")
+    ca_next_str=$(_utime "$ca_next_val")
+    [[ "$ca_state" != "active" ]] && ca_next_str="—"
+    ca_stamp_file="/var/lib/nase/config-archive.stamp"
+    if [[ -f "$ca_stamp_file" ]]; then
+        local ca_ts
+        ca_ts=$(stat -c %Y "$ca_stamp_file")
+        ca_last_str="$(date -d "@${ca_ts}" '+%Y-%m-%d %H:%M:%S') ($(_ago "$ca_ts"))"
+    else
+        ca_last_str="never"
+    fi
+    printf "  %-22s " "config-archive"
+    _state_badge "$ca_state"
+    printf "  %-22s %s\n" "$ca_next_str" "$ca_last_str"
+
+    printf "\n"
+
     # ── Sync timers ───────────────────────────────────────────────────────────
     printf "${_C_BOLD}Sync Timers${_C_RST}\n"
     printf "  %-22s %-10s %-22s %s\n" "JOB" "STATUS" "NEXT TRIGGER" "LAST SYNC"
@@ -421,13 +446,17 @@ cmd_apply() {
             log_section "notifications"
             log_ok "Notifications config is read at runtime by sync jobs — no service to restart."
             ;;
+        config-archive|config_archive)
+            _apply_preflight
+            _run_module config-archive
+            ;;
         watch|file_watch)
             _apply_preflight
             _run_module watch
             ;;
         *)
             log_error "Unknown section: '${section}'"
-            log_info "Valid sections: nas, drives, samba, sync, services, tailscale, notifications, watch"
+            log_info "Valid sections: nas, drives, samba, sync, config-archive, services, tailscale, notifications, watch"
             exit 1
             ;;
     esac
@@ -472,6 +501,7 @@ ${_C_BOLD}Commands:${_C_RST}
     drives                  Mount units and spindown rules
     samba                   Samba shares and users     [prereq: drives]
     sync                    Sync job timers            [prereq: drives]
+    config-archive          Config archive timer
     services                Web dashboard + filebrowser [prereq: drives]
     tailscale               Tailscale VPN
     notifications           Validate only (config read at runtime)

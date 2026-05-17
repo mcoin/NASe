@@ -91,8 +91,8 @@ def drive_info(drive: dict) -> dict:
     return {"status": "mounted", "mode": mode, "usage": usage}
 
 # ── Stamp info ─────────────────────────────────────────────────────────────────
-def stamp_info(job_name: str) -> tuple[str, str | None]:
-    stamp = STAMP_DIR / f"sync-{job_name}.stamp"
+def stamp_info(job_name: str, *, stamp_file: Path | None = None) -> tuple[str, str | None]:
+    stamp = stamp_file if stamp_file is not None else STAMP_DIR / f"sync-{job_name}.stamp"
     if not stamp.exists():
         return "never", None
     mtime = stamp.stat().st_mtime
@@ -135,6 +135,21 @@ def build_status(cfg: dict) -> dict:
     drives = [{**d, **drive_info(d)} for d in cfg.get("drives", [])]
 
     timers = []
+
+    # Config archive timer (shown first, separate from user data sync jobs)
+    if cfg.get("config_archive"):
+        unit  = "nase-config-archive.timer"
+        state = unit_active(unit)
+        last, ago = stamp_info("config-archive",
+                               stamp_file=STAMP_DIR / "config-archive.stamp")
+        timers.append({
+            "name":  "config-archive",
+            "state": state,
+            "next":  unit_next(unit) if state == "active" else "—",
+            "last":  last,
+            "ago":   ago,
+        })
+
     for job in cfg.get("sync_jobs", []):
         name      = job["name"]
         unit      = f"nase-sync-{name}.timer"
@@ -174,14 +189,15 @@ def read_log(job: str | None, lines: int = 80) -> list[dict]:
 # ── Config sections ────────────────────────────────────────────────────────────
 # Order and display labels for the config editor tabs.
 CONFIG_SECTIONS: list[tuple[str, str]] = [
-    ("nas",           "General"),
-    ("drives",        "Drives"),
-    ("samba",         "Samba"),
-    ("sync_jobs",     "Sync Jobs"),
-    ("services",      "Services"),
-    ("tailscale",     "Tailscale"),
-    ("notifications", "Notifications"),
-    ("file_watch",    "File Watch"),
+    ("nas",            "General"),
+    ("drives",         "Drives"),
+    ("samba",          "Samba"),
+    ("sync_jobs",      "Sync Jobs"),
+    ("config_archive", "Config Archive"),
+    ("services",       "Services"),
+    ("tailscale",      "Tailscale"),
+    ("notifications",  "Notifications"),
+    ("file_watch",     "File Watch"),
 ]
 _SECTION_KEYS = {k for k, _ in CONFIG_SECTIONS}
 
@@ -288,14 +304,15 @@ _SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
 
 # Maps config section key → nase apply subcommand argument
 _SECTION_APPLY_ARG: dict[str, str] = {
-    "nas":           "nas",
-    "drives":        "drives",
-    "samba":         "samba",
-    "sync_jobs":     "sync",
-    "services":      "services",
-    "tailscale":     "tailscale",
-    "notifications": "notifications",
-    "file_watch":    "watch",
+    "nas":            "nas",
+    "drives":         "drives",
+    "samba":          "samba",
+    "sync_jobs":      "sync",
+    "config_archive": "config-archive",
+    "services":       "services",
+    "tailscale":      "tailscale",
+    "notifications":  "notifications",
+    "file_watch":     "watch",
 }
 
 def _stream_cmd(*cmd: str) -> StreamingResponse:

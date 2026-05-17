@@ -117,24 +117,23 @@ tailscale:
   advertise_routes: ""
 
 # --------------------------------------------------------------------------
-# Sync jobs
+# Config archive
 # --------------------------------------------------------------------------
-# schedule uses systemd OnCalendar format:
-#   "*-*-* 03:00:00"      → daily at 03:00
-#   "*-*-* *:00/30:00"    → every 30 minutes
-#   "Mon *-*-* 02:00:00"  → every Monday at 02:00
-# See: systemd.time(7) or run: systemd-analyze calendar "<expression>"
-#
-# rsync_flags:     passed verbatim to rsync
-# on_failure:      "notify" | "ignore"
-# force_sync_days: run a full sync even when no changes are detected, if this
-#                  many days have passed since the last successful sync.
-#                  Guards against the change-detection mechanism being wrong.
-#                  Default: 7. Set to 0 to disable.
+# Probes /opt/nase/config.yaml for changes on a schedule and copies it to
+# dest. On each change writes dest/config.yaml (latest) and a timestamped
+# snapshot dest/<ISO-timestamp>/config.yaml for reference.
+# Old snapshots are pruned after retention_days.
+# schedule: systemd OnCalendar format (see sync_jobs comment below)
+# on_failure: "notify" | "ignore"
 # --------------------------------------------------------------------------
+config_archive:
+  dest: /mnt/primary/NASe
+  schedule: '*-*-* *:00/10:00'
+  retention_days: 90
+  on_failure: notify
 sync_jobs:
   # NASe config archive — mirrors the versioned config history to both backup
-  # drives. Trash is disabled; retention (90 days) is managed by apply.sh.
+  # drives. Trash is disabled; snapshots are managed by the config-archive timer.
   - name: nase-config-backup1
     source: /mnt/primary/NASe/
     dest: /mnt/backup_daily/NASe/
@@ -211,7 +210,7 @@ sync_jobs:
   - name: music-backup2
     source: /mnt/primary/Music/
     dest: /mnt/backup_weekly/Music/
-    schedule: '*-*-* *:00/05:00'
+    schedule: '*-*-* *:00/10:00'
     rsync_flags: --archive --delete --checksum
     on_failure: notify
     force_sync_days: 7
@@ -222,7 +221,7 @@ sync_jobs:
   - name: omv2-backup2
     source: /mnt/primary/omv2/
     dest: /mnt/backup_weekly/omv2/
-    schedule: '*-*-* *:00/05:00'
+    schedule: '*-*-* *:00/10:00'
     rsync_flags: --archive --delete
     on_failure: notify
     force_sync_days: 7
@@ -233,7 +232,7 @@ sync_jobs:
   - name: photos-backup2
     source: /mnt/primary/Photo_albums/
     dest: /mnt/backup_weekly/Photo_albums/
-    schedule: '*-*-* *:00/05:00'
+    schedule: '*-*-* *:00/10:00'
     rsync_flags: --archive --delete
     on_failure: notify
     force_sync_days: 7
@@ -244,7 +243,7 @@ sync_jobs:
   - name: test-backup2
     source: /mnt/primary/test/
     dest: /mnt/backup_weekly/test/
-    schedule: '*-*-* *:00/05:00'
+    schedule: '*-*-* *:00/10:00'
     rsync_flags: --archive --delete
     on_failure: notify
     force_sync_days: 7
@@ -255,7 +254,7 @@ sync_jobs:
   - name: videos-backup2
     source: /mnt/primary/videos/
     dest: /mnt/backup_weekly/videos/
-    schedule: '*-*-* *:00/05:00'
+    schedule: '*-*-* *:00/10:00'
     rsync_flags: --archive --delete
     on_failure: notify
     force_sync_days: 7

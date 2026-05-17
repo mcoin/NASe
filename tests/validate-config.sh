@@ -86,6 +86,23 @@ for i in $(seq 0 $((n_shares - 1))); do
     [[ -n "$share_path" ]] || fail ".samba.shares[$i].path is required (share: ${share_name})."
 done
 
+# ── config_archive section ────────────────────────────────────────────────────
+ca_dest=$(config_get '.config_archive.dest // ""')
+ca_schedule=$(config_get '.config_archive.schedule // ""')
+ca_on_failure=$(config_get '.config_archive.on_failure // "notify"')
+
+if [[ -n "$ca_dest" && ! "$ca_dest" == /* ]]; then
+    fail ".config_archive.dest must be an absolute path (got: '${ca_dest}')."
+fi
+if [[ "$ca_on_failure" != "notify" && "$ca_on_failure" != "ignore" ]]; then
+    fail ".config_archive.on_failure must be 'notify' or 'ignore' (got: '${ca_on_failure}')."
+fi
+if [[ -n "$ca_schedule" ]] && command -v systemd-analyze &>/dev/null; then
+    if ! systemd-analyze calendar "$ca_schedule" &>/dev/null; then
+        fail ".config_archive.schedule '${ca_schedule}' is not a valid systemd OnCalendar expression."
+    fi
+fi
+
 # ── sync_jobs section ─────────────────────────────────────────────────────────
 n_jobs=$(config_len '.sync_jobs')
 declare -A seen_job_names
