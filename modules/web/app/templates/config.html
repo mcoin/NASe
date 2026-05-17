@@ -3,13 +3,19 @@
 
 {% block content %}
 
-<div class="card">
+<div class="card" id="config-card">
   <div class="tab-bar">
     {% for key, label in sections %}
     <button class="tab-btn {% if key == active_tab %}active{% endif %}"
             data-tab="{{ key }}"
             onclick="switchTab('{{ key }}')">{{ label }}</button>
     {% endfor %}
+    <div class="vt-global">
+      <div class="view-toggle">
+        <button type="button" class="vt-btn" id="vt-yaml" onclick="switchView('yaml')">YAML</button>
+        <button type="button" class="vt-btn vt-active" id="vt-form" onclick="switchView('form')">Form</button>
+      </div>
+    </div>
   </div>
 
   {% for key, label in sections %}
@@ -18,22 +24,13 @@
           hx-target="#save-result-{{ key }}"
           hx-swap="innerHTML">
 
-      {% if key in ('nas', 'services', 'tailscale', 'notifications', 'drives', 'samba', 'sync_jobs', 'config_archive', 'file_watch') %}
-      <div class="view-toggle-bar">
-        <div class="view-toggle">
-          <button type="button" class="vt-btn vt-active" id="vt-yaml-{{ key }}" onclick="switchView('{{ key }}','yaml')">YAML</button>
-          <button type="button" class="vt-btn" id="vt-form-{{ key }}" onclick="switchView('{{ key }}','form')">Form</button>
-        </div>
-      </div>
-      {% endif %}
-
       <div class="editor-wrap" id="yaml-view-{{ key }}">
         <textarea class="yaml-editor" name="yaml_text" spellcheck="false"
                   oninput="document.getElementById('save-result-{{ key }}').innerHTML = ''">{{ section_yaml[key] }}</textarea>
       </div>
 
       {% if key == 'nas' %}
-      <div class="form-view" id="form-view-nas" style="display:none">
+      <div class="form-view" id="form-view-nas">
         <div class="form-body">
           <div class="form-row">
             <label class="form-label" for="field-nas-hostname">Hostname</label>
@@ -47,7 +44,7 @@
       {% endif %}
 
       {% if key == 'services' %}
-      <div class="form-view" id="form-view-services" style="display:none">
+      <div class="form-view" id="form-view-services">
         <input type="hidden" id="field-svc-fb-root">
         <div class="form-body">
 
@@ -101,7 +98,7 @@
       {% endif %}
 
       {% if key == 'tailscale' %}
-      <div class="form-view" id="form-view-tailscale" style="display:none">
+      <div class="form-view" id="form-view-tailscale">
         <div class="form-body">
           <div class="form-row">
             <label class="form-label" for="field-ts-enabled">Enabled</label>
@@ -129,7 +126,7 @@
       {% endif %}
 
       {% if key == 'notifications' %}
-      <div class="form-view" id="form-view-notifications" style="display:none">
+      <div class="form-view" id="form-view-notifications">
         <div class="form-body">
           <div class="form-row">
             <label class="form-label" for="field-notif-method">Method</label>
@@ -159,14 +156,14 @@
       {% endif %}
 
       {% if key == 'drives' %}
-      <div class="form-view" id="form-view-drives" style="display:none">
+      <div class="form-view" id="form-view-drives">
         <div class="drive-tab-bar" id="drive-tab-bar"></div>
         <div id="drive-panels"></div>
       </div>
       {% endif %}
 
       {% if key == 'samba' %}
-      <div class="form-view" id="form-view-samba" style="display:none">
+      <div class="form-view" id="form-view-samba">
         <div class="form-body">
           <div class="form-row">
             <label class="form-label" for="field-smb-workgroup">Workgroup</label>
@@ -188,14 +185,14 @@
       {% endif %}
 
       {% if key == 'sync_jobs' %}
-      <div class="form-view" id="form-view-sync_jobs" style="display:none">
+      <div class="form-view" id="form-view-sync_jobs">
         <div class="drive-tab-bar" id="syncjob-tab-bar"></div>
         <div id="syncjob-panels"></div>
       </div>
       {% endif %}
 
       {% if key == 'config_archive' %}
-      <div class="form-view" id="form-view-config_archive" style="display:none">
+      <div class="form-view" id="form-view-config_archive">
         <div class="form-body">
           <div class="form-row">
             <label class="form-label" for="field-ca-dest">Destination</label>
@@ -232,18 +229,14 @@
       {% endif %}
 
       {% if key == 'file_watch' %}
-      <div class="form-view" id="form-view-file_watch" style="display:none">
+      <div class="form-view" id="form-view-file_watch">
         <div class="drive-tab-bar" id="watch-tab-bar"></div>
         <div id="watch-panels"></div>
       </div>
       {% endif %}
 
       <div class="editor-footer">
-        {% if key in ('nas', 'services', 'tailscale', 'notifications', 'drives', 'samba', 'sync_jobs', 'config_archive', 'file_watch') %}
         <button type="submit" class="btn-save" onclick="beforeSave('{{ key }}')">Save {{ label }}</button>
-        {% else %}
-        <button type="submit" class="btn-save">Save {{ label }}</button>
-        {% endif %}
         <button type="button" class="btn-apply" onclick="runApply('{{ key }}')">Apply {{ label }}</button>
         <span id="save-result-{{ key }}" class="save-result"></span>
       </div>
@@ -268,37 +261,40 @@
 
 {% block scripts %}
 <script>
+  // ── Global view mode ─────────────────────────────────────────────────────
+  var _viewMode  = "form";
+  var _activeTab = "{{ active_tab }}";
+
   // ── Tab switching ────────────────────────────────────────────────────────
   function switchTab(key) {
     document.querySelectorAll(".tab-panel").forEach(function(p) { p.classList.remove("active"); });
     document.querySelectorAll(".tab-btn").forEach(function(b) { b.classList.remove("active"); });
     document.getElementById("panel-" + key).classList.add("active");
     document.querySelector('[data-tab="' + key + '"]').classList.add("active");
+    _activeTab = key;
+    if (_viewMode === "form") {
+      populateForm(key, document.querySelector("#yaml-view-" + key + " textarea").value);
+    }
   }
 
   // ── YAML / Form view toggle ──────────────────────────────────────────────
-  function switchView(key, mode) {
-    var yamlWrap = document.getElementById("yaml-view-" + key);
-    var formView = document.getElementById("form-view-" + key);
-    var yamlBtn  = document.getElementById("vt-yaml-" + key);
-    var formBtn  = document.getElementById("vt-form-" + key);
-    if (mode === "form") {
-      populateForm(key, yamlWrap.querySelector("textarea").value);
-      yamlWrap.style.display = "none";
-      formView.style.display = "block";
-      yamlBtn.classList.remove("vt-active");
-      formBtn.classList.add("vt-active");
+  function switchView(mode) {
+    _viewMode = mode;
+    var card = document.getElementById("config-card");
+    if (mode === "yaml") {
+      card.classList.add("view-yaml");
+      document.getElementById("vt-yaml").classList.add("vt-active");
+      document.getElementById("vt-form").classList.remove("vt-active");
     } else {
-      yamlWrap.style.display = "block";
-      formView.style.display = "none";
-      yamlBtn.classList.add("vt-active");
-      formBtn.classList.remove("vt-active");
+      card.classList.remove("view-yaml");
+      document.getElementById("vt-yaml").classList.remove("vt-active");
+      document.getElementById("vt-form").classList.add("vt-active");
+      populateForm(_activeTab, document.querySelector("#yaml-view-" + _activeTab + " textarea").value);
     }
   }
 
   function beforeSave(key) {
-    var formView = document.getElementById("form-view-" + key);
-    if (formView && formView.style.display !== "none") {
+    if (_viewMode === "form") {
       document.querySelector("#yaml-view-" + key + " textarea").value = marshalForm(key);
     }
   }
@@ -1120,8 +1116,12 @@
     _watchRender();
   }
 
-  // Clear save banner on any input inside a form view
+  // ── On load: populate the initial tab's form and wire banner-clear ─────
   document.addEventListener("DOMContentLoaded", function() {
+    var initYaml = document.querySelector("#yaml-view-" + _activeTab + " textarea");
+    if (initYaml) populateForm(_activeTab, initYaml.value);
+
+    // Clear save banner on any input inside a form view
     ["nas", "services", "tailscale", "notifications", "drives", "samba", "sync_jobs", "config_archive", "file_watch"].forEach(function(key) {
       var fv = document.getElementById("form-view-" + key);
       if (fv) fv.addEventListener("input", function() {
