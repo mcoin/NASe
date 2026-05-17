@@ -18,7 +18,7 @@
           hx-target="#save-result-{{ key }}"
           hx-swap="innerHTML">
 
-      {% if key in ('nas', 'services', 'tailscale', 'notifications') %}
+      {% if key in ('nas', 'services', 'tailscale', 'notifications', 'drives') %}
       <div class="view-toggle-bar">
         <div class="view-toggle">
           <button type="button" class="vt-btn vt-active" id="vt-yaml-{{ key }}" onclick="switchView('{{ key }}','yaml')">YAML</button>
@@ -158,8 +158,15 @@
       </div>
       {% endif %}
 
+      {% if key == 'drives' %}
+      <div class="form-view" id="form-view-drives" style="display:none">
+        <div class="drive-tab-bar" id="drive-tab-bar"></div>
+        <div id="drive-panels"></div>
+      </div>
+      {% endif %}
+
       <div class="editor-footer">
-        {% if key in ('nas', 'services', 'tailscale', 'notifications') %}
+        {% if key in ('nas', 'services', 'tailscale', 'notifications', 'drives') %}
         <button type="submit" class="btn-save" onclick="beforeSave('{{ key }}')">Save {{ label }}</button>
         {% else %}
         <button type="submit" class="btn-save">Save {{ label }}</button>
@@ -259,6 +266,11 @@
       _setVal("field-notif-method", d.method || "none");
       _setVal("field-notif-email",  d.email  || "");
       _toggleNotifFields();
+
+    } else if (key === "drives") {
+      _drives = _parseDrivesYaml(yaml);
+      _activeDriveIdx = 0;
+      _driveRender();
     }
   }
 
@@ -298,6 +310,10 @@
       var email  = document.getElementById("field-notif-email").value.trim();
       return "method: " + method + "\n"
            + "email: "  + email  + "\n";
+
+    } else if (key === "drives") {
+      _driveSavePanel(_activeDriveIdx);
+      return _marshalDrivesYaml();
     }
   }
 
@@ -321,9 +337,180 @@
   function _setVal(id, val)   { document.getElementById(id).value   = val; }
   function _setCheck(id, val) { document.getElementById(id).checked = !!val; }
 
+  // ── Drives: state + helpers ──────────────────────────────────────────────
+  var _drives = [];
+  var _activeDriveIdx = 0;
+
+  function _parseDrivesYaml(yaml) {
+    var drives = [];
+    var current = null;
+    yaml.split("\n").forEach(function(line) {
+      var m = line.match(/^-\s+name:\s*(.*)/);
+      if (m) {
+        if (current) drives.push(current);
+        current = { name: m[1].replace(/^["']|["']$/g, "").trim() };
+      } else if (current) {
+        var kv = line.match(/^\s+(\w+):\s*(.*)/);
+        if (kv) current[kv[1]] = kv[2].replace(/^["']|["']$/g, "").trim();
+      }
+    });
+    if (current) drives.push(current);
+    return drives;
+  }
+
+  function _marshalDrivesYaml() {
+    return _drives.map(function(d) {
+      var lines = [];
+      lines.push("- name: " + (d.name || ""));
+      lines.push("  active: "       + (d.active       === "false" ? "false" : "true"));
+      lines.push('  uuid: "'        + (d.uuid         || "") + '"');
+      lines.push('  label: "'       + (d.label        || "") + '"');
+      lines.push("  mountpoint: "   + (d.mountpoint   || ""));
+      lines.push("  role: "         + (d.role         || "main"));
+      lines.push("  filesystem: "   + (d.filesystem   || "ext4"));
+      lines.push("  spindown_min: " + (parseInt(d.spindown_min, 10) || 60));
+      lines.push("  smart_check: "  + (d.smart_check  === "false" ? "false" : "true"));
+      if (d.owner)                   lines.push("  owner: " + d.owner);
+      if (d.read_only === "true")    lines.push("  read_only: true");
+      return lines.join("\n");
+    }).join("\n\n") + "\n";
+  }
+
+  function _driveSavePanel(i) {
+    var d = _drives[i];
+    if (!d) return;
+    function _g(f)  { var el = document.getElementById("drive-"+i+"-"+f); return el ? el.value.trim() : ""; }
+    function _gc(f) { var el = document.getElementById("drive-"+i+"-"+f); return el ? String(el.checked) : "true"; }
+    d.name         = _g("name");
+    d.active       = _gc("active");
+    d.uuid         = _g("uuid");
+    d.label        = _g("label");
+    d.mountpoint   = _g("mountpoint");
+    d.role         = _g("role");
+    d.filesystem   = _g("filesystem");
+    d.spindown_min = _g("spindown_min");
+    d.smart_check  = _gc("smart_check");
+    d.owner        = _g("owner");
+    d.read_only    = _gc("read_only");
+  }
+
+  function _drivePanelHTML(d, i) {
+    function e(s) { return String(s||"").replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+    function chk(v) { return (v === "true" || v === true) ? " checked" : ""; }
+    var ro  = d.read_only  === "true";
+    var act = d.active     !== "false";
+    var sc  = d.smart_check !== "false";
+    return '<div class="form-body">'
+      + '<div class="form-row"><label class="form-label" for="drive-'+i+'-name">Name</label>'
+      + '<div class="form-field"><input class="form-input" id="drive-'+i+'-name" type="text" value="'+e(d.name)+'" oninput="_driveTabLabel('+i+',this.value)">'
+      + '<span class="form-hint">Identifier used in unit names and logs.</span></div></div>'
+
+      + '<div class="form-row"><label class="form-label" for="drive-'+i+'-active">Active</label>'
+      + '<div class="form-field"><input class="form-checkbox" id="drive-'+i+'-active" type="checkbox"'+(act?" checked":"")+'>'
+      + '<span class="form-hint">Uncheck to skip this drive in all operations.</span></div></div>'
+
+      + '<div class="form-row"><label class="form-label" for="drive-'+i+'-uuid">UUID</label>'
+      + '<div class="form-field"><input class="form-input" id="drive-'+i+'-uuid" type="text" value="'+e(d.uuid)+'">'
+      + '<span class="form-hint">From <code>blkid</code>. Used to build the .mount unit.</span></div></div>'
+
+      + '<div class="form-row"><label class="form-label" for="drive-'+i+'-label">Label</label>'
+      + '<div class="form-field"><input class="form-input" id="drive-'+i+'-label" type="text" value="'+e(d.label)+'"></div></div>'
+
+      + '<div class="form-row"><label class="form-label" for="drive-'+i+'-mountpoint">Mountpoint</label>'
+      + '<div class="form-field"><input class="form-input" id="drive-'+i+'-mountpoint" type="text" value="'+e(d.mountpoint)+'"></div></div>'
+
+      + '<div class="form-row"><label class="form-label" for="drive-'+i+'-role">Role</label>'
+      + '<div class="form-field"><select class="form-input" id="drive-'+i+'-role">'
+      + '<option value="main"'+(d.role==="main"?" selected":"")+'>main</option>'
+      + '<option value="backup"'+(d.role==="backup"?" selected":"")+'>backup</option>'
+      + '</select></div></div>'
+
+      + '<div class="form-row"><label class="form-label" for="drive-'+i+'-filesystem">Filesystem</label>'
+      + '<div class="form-field"><input class="form-input form-input-sm" id="drive-'+i+'-filesystem" type="text" value="'+e(d.filesystem||"ext4")+'"></div></div>'
+
+      + '<div class="form-row"><label class="form-label" for="drive-'+i+'-spindown_min">Spindown (min)</label>'
+      + '<div class="form-field"><input class="form-input form-input-sm" id="drive-'+i+'-spindown_min" type="number" min="0" value="'+e(d.spindown_min||"60")+'">'
+      + '<span class="form-hint">Idle minutes before spinning down. 0 disables.</span></div></div>'
+
+      + '<div class="form-row"><label class="form-label" for="drive-'+i+'-smart_check">SMART check</label>'
+      + '<div class="form-field"><input class="form-checkbox" id="drive-'+i+'-smart_check" type="checkbox"'+(sc?" checked":"")+'></div></div>'
+
+      + '<div class="form-row"><label class="form-label" for="drive-'+i+'-owner">Owner</label>'
+      + '<div class="form-field"><input class="form-input" id="drive-'+i+'-owner" type="text" value="'+e(d.owner||"")+'">'
+      + '<span class="form-hint">Unix user that owns the mountpoint (main drives).</span></div></div>'
+
+      + '<div class="form-row"><label class="form-label" for="drive-'+i+'-read_only">Read-only</label>'
+      + '<div class="form-field"><input class="form-checkbox" id="drive-'+i+'-read_only" type="checkbox"'+(ro?" checked":"")+'>'
+      + '<span class="form-hint">Mounted ro at rest; sync jobs remount rw temporarily.</span></div></div>'
+
+      + '<div class="form-row"><label class="form-label"></label>'
+      + '<div class="form-field"><button type="button" class="btn-remove" onclick="_driveRemove('+i+')">'
+      + 'Remove this drive</button></div></div>'
+      + '</div>';
+  }
+
+  function _driveRender() {
+    var bar    = document.getElementById("drive-tab-bar");
+    var panels = document.getElementById("drive-panels");
+    if (!bar || !panels) return;
+    bar.innerHTML    = "";
+    panels.innerHTML = "";
+    _drives.forEach(function(d, i) {
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "drive-tab-btn" + (i === _activeDriveIdx ? " active" : "");
+      btn.id        = "drive-tab-" + i;
+      btn.textContent = d.name || ("drive " + (i + 1));
+      btn.onclick = (function(idx) {
+        return function() {
+          if (idx === _activeDriveIdx) return;
+          _driveSavePanel(_activeDriveIdx);
+          _activeDriveIdx = idx;
+          _driveRender();
+        };
+      })(i);
+      bar.appendChild(btn);
+    });
+    var addBtn = document.createElement("button");
+    addBtn.type = "button";
+    addBtn.className = "drive-add-btn";
+    addBtn.textContent = "+ Add";
+    addBtn.onclick = _driveAdd;
+    bar.appendChild(addBtn);
+
+    _drives.forEach(function(d, i) {
+      var panel = document.createElement("div");
+      panel.id = "drive-panel-" + i;
+      panel.className = "drive-panel" + (i === _activeDriveIdx ? " active" : "");
+      panel.innerHTML = _drivePanelHTML(d, i);
+      panels.appendChild(panel);
+    });
+  }
+
+  function _driveTabLabel(i, val) {
+    var btn = document.getElementById("drive-tab-" + i);
+    if (btn) btn.textContent = val || ("drive " + (i + 1));
+  }
+
+  function _driveAdd() {
+    _driveSavePanel(_activeDriveIdx);
+    _drives.push({ name: "", active: "true", uuid: "", label: "", mountpoint: "",
+                   role: "main", filesystem: "ext4", spindown_min: "60",
+                   smart_check: "true", owner: "", read_only: "false" });
+    _activeDriveIdx = _drives.length - 1;
+    _driveRender();
+  }
+
+  function _driveRemove(i) {
+    if (_drives.length <= 1) return;
+    _drives.splice(i, 1);
+    if (_activeDriveIdx >= _drives.length) _activeDriveIdx = _drives.length - 1;
+    _driveRender();
+  }
+
   // Clear save banner on any input inside a form view
   document.addEventListener("DOMContentLoaded", function() {
-    ["nas", "services", "tailscale", "notifications"].forEach(function(key) {
+    ["nas", "services", "tailscale", "notifications", "drives"].forEach(function(key) {
       var fv = document.getElementById("form-view-" + key);
       if (fv) fv.addEventListener("input", function() {
         document.getElementById("save-result-" + key).innerHTML = "";
