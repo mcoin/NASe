@@ -17,12 +17,42 @@
     <form hx-post="/config/{{ key }}"
           hx-target="#save-result-{{ key }}"
           hx-swap="innerHTML">
-      <div class="editor-wrap">
+
+      {% if key == 'nas' %}
+      <div class="view-toggle-bar">
+        <div class="view-toggle">
+          <button type="button" class="vt-btn vt-active" id="vt-yaml-nas" onclick="switchView('nas','yaml')">YAML</button>
+          <button type="button" class="vt-btn" id="vt-form-nas" onclick="switchView('nas','form')">Form</button>
+        </div>
+      </div>
+      {% endif %}
+
+      <div class="editor-wrap" id="yaml-view-{{ key }}">
         <textarea class="yaml-editor" name="yaml_text" spellcheck="false"
                   oninput="document.getElementById('save-result-{{ key }}').innerHTML = ''">{{ section_yaml[key] }}</textarea>
       </div>
+
+      {% if key == 'nas' %}
+      <div class="form-view" id="form-view-nas" style="display:none">
+        <div class="form-body">
+          <div class="form-row">
+            <label class="form-label" for="field-nas-hostname">Hostname</label>
+            <div class="form-field">
+              <input class="form-input" id="field-nas-hostname" type="text"
+                     oninput="document.getElementById('save-result-nas').innerHTML = ''">
+              <span class="form-hint">The hostname this Pi uses on the local network.</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+
       <div class="editor-footer">
+        {% if key == 'nas' %}
+        <button type="submit" class="btn-save" onclick="beforeSaveNas()">Save {{ label }}</button>
+        {% else %}
         <button type="submit" class="btn-save">Save {{ label }}</button>
+        {% endif %}
         <button type="button" class="btn-apply" onclick="runApply('{{ key }}')">Apply {{ label }}</button>
         <span id="save-result-{{ key }}" class="save-result"></span>
       </div>
@@ -52,6 +82,45 @@
     document.querySelectorAll(".tab-btn").forEach(function(b) { b.classList.remove("active"); });
     document.getElementById("panel-" + key).classList.add("active");
     document.querySelector('[data-tab="' + key + '"]').classList.add("active");
+  }
+
+  function switchView(key, mode) {
+    var yamlWrap = document.getElementById("yaml-view-" + key);
+    var formView = document.getElementById("form-view-" + key);
+    var yamlBtn  = document.getElementById("vt-yaml-" + key);
+    var formBtn  = document.getElementById("vt-form-" + key);
+    if (mode === "form") {
+      populateForm(key, yamlWrap.querySelector("textarea").value);
+      yamlWrap.style.display = "none";
+      formView.style.display = "block";
+      yamlBtn.classList.remove("vt-active");
+      formBtn.classList.add("vt-active");
+    } else {
+      yamlWrap.style.display = "block";
+      formView.style.display = "none";
+      yamlBtn.classList.add("vt-active");
+      formBtn.classList.remove("vt-active");
+    }
+  }
+
+  function populateForm(key, yaml) {
+    if (key === "nas") {
+      var m = yaml.match(/hostname:\s*(\S+)/);
+      document.getElementById("field-nas-hostname").value = m ? m[1] : "";
+    }
+  }
+
+  function marshalForm(key) {
+    if (key === "nas") {
+      return "hostname: " + document.getElementById("field-nas-hostname").value.trim() + "\n";
+    }
+  }
+
+  function beforeSaveNas() {
+    var formView = document.getElementById("form-view-nas");
+    if (formView && formView.style.display !== "none") {
+      document.querySelector("#yaml-view-nas textarea").value = marshalForm("nas");
+    }
   }
 
   function applyClass(text) {
