@@ -33,14 +33,10 @@
 
 <div class="card" id="apply-card">
   <div class="card-head">
-    <span>Apply configuration</span>
+    <span>Apply output</span>
     <span class="apply-status" id="apply-status"></span>
   </div>
   <div class="card-body">
-    <div class="apply-toolbar">
-      <button id="apply-btn" class="btn-apply" onclick="runApply()">Apply all</button>
-      <span class="apply-hint">Applies all sections to the live system. Use the per-section <strong>Apply</strong> buttons above to apply only what changed.</span>
-    </div>
     <div id="apply-wrap" class="apply-wrap" style="display:none">
       <div id="apply-output" class="apply-panel"></div>
     </div>
@@ -67,14 +63,12 @@
   }
 
   function runApply(section) {
-    var url        = section ? "/apply/" + section : "/apply";
-    var btn        = document.getElementById("apply-btn");
+    var url        = "/apply/" + section;
     var out        = document.getElementById("apply-output");
     var wrap       = document.getElementById("apply-wrap");
     var status     = document.getElementById("apply-status");
-    var saveResult = section ? document.getElementById("save-result-" + section) : null;
+    var saveResult = document.getElementById("save-result-" + section);
 
-    btn.disabled = true;
     out.innerHTML = "";
     wrap.style.display = "block";
     status.textContent = "running…";
@@ -105,8 +99,6 @@
         status.className = "apply-status apply-status-ok";
         if (saveResult) {
           saveResult.innerHTML = '<span class="save-ok">&#10003; Applied at ' + ts + '</span>';
-        } else {
-          document.querySelectorAll('[id^="save-result-"]').forEach(function(el) { el.innerHTML = ""; });
         }
       } else {
         msg.className = "log-err";

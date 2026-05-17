@@ -340,11 +340,6 @@ def _stream_cmd(*cmd: str) -> StreamingResponse:
     return StreamingResponse(_stream(), media_type="text/event-stream", headers=_SSE_HEADERS)
 
 
-@_protected.get("/apply")
-async def apply_all():
-    """Stream apply.sh output as Server-Sent Events."""
-    return _stream_cmd(str(REPO_ROOT / "apply.sh"))
-
 
 @_protected.get("/apply/{section}")
 async def apply_section(section: str):

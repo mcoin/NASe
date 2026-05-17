@@ -409,17 +409,19 @@ cmd_apply() {
         drives)
             _apply_preflight
             _run_module drives
+            # Cascade: all modules whose systemd units reference drive mountpoints
+            # in After= must be regenerated whenever drives change.
+            _run_module config-archive
+            _run_module samba
+            _run_module sync
+            config_bool '.services.filebrowser.enabled' 2>/dev/null && _run_module filebrowser
             ;;
         samba)
             _apply_preflight
-            log_info "Prerequisite: drives"
-            _run_module drives
             _run_module samba
             ;;
         sync|sync_jobs)
             _apply_preflight
-            log_info "Prerequisite: drives"
-            _run_module drives
             _run_module sync
             ;;
         services)
