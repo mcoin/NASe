@@ -47,6 +47,10 @@ app = FastAPI(title="NASe Dashboard")
 app.mount("/static", StaticFiles(directory=str(APP_DIR / "static")), name="static")
 templates = Jinja2Templates(directory=str(APP_DIR / "templates"))
 
+# Cache-bust static assets by fingerprinting at startup.
+_css_v = str(int((APP_DIR / "static" / "style.css").stat().st_mtime))
+templates.env.globals["css_v"] = _css_v
+
 # Router whose routes all require authentication (config editing + apply).
 _protected = APIRouter(dependencies=[Depends(_require_auth)])
 
