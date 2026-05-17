@@ -134,7 +134,7 @@ config_archive:
 sync_jobs:
   # NASe config archive — mirrors the versioned config history to both backup
   # drives. Trash is disabled; snapshots are managed by the config-archive timer.
-  - name: nase-config-backup1
+  - name: nase-cfg-backup-daily
     source: /mnt/primary/NASe/
     dest: /mnt/backup_daily/NASe/
     schedule: '*-*-* *:00/01:00'
@@ -143,7 +143,7 @@ sync_jobs:
     force_sync_days: 1
     trash:
       enabled: false
-  - name: nase-config-backup2
+  - name: nase-cfg-backup-weekly
     source: /mnt/primary/NASe/
     dest: /mnt/backup_weekly/NASe/
     schedule: '*-*-* *:00/05:00'
@@ -152,7 +152,7 @@ sync_jobs:
     force_sync_days: 1
     trash:
       enabled: false
-  - name: music-backup1
+  - name: music-backup-daily
     source: /mnt/primary/Music/
     dest: /mnt/backup_daily/Music/
     schedule: '*-*-* *:00/01:00'
@@ -163,7 +163,7 @@ sync_jobs:
       enabled: true
       path: /mnt/backup_daily/.trash
       retention_days: 30
-  - name: omv2-backup1
+  - name: omv2-backup-daily
     source: /mnt/primary/omv2/
     dest: /mnt/backup_daily/omv2/
     schedule: '*-*-* *:00/01:00'
@@ -174,7 +174,7 @@ sync_jobs:
       enabled: true
       path: /mnt/backup_daily/.trash
       retention_days: 30
-  - name: photos-backup1
+  - name: photos-backup-daily
     source: /mnt/primary/Photo_albums/
     dest: /mnt/backup_daily/Photo_albums/
     schedule: '*-*-* *:00/01:00'
@@ -185,7 +185,7 @@ sync_jobs:
       enabled: true
       path: /mnt/backup_daily/.trash
       retention_days: 30
-  - name: test-backup1
+  - name: test-backup-daily
     source: /mnt/primary/test/
     dest: /mnt/backup_daily/test/
     schedule: '*-*-* *:00/01:00'
@@ -196,7 +196,7 @@ sync_jobs:
       enabled: true
       path: /mnt/backup_daily/.trash
       retention_days: 30
-  - name: videos-backup1
+  - name: videos-backup-daily
     source: /mnt/primary/videos/
     dest: /mnt/backup_daily/videos/
     schedule: '*-*-* *:00/01:00'
@@ -207,7 +207,7 @@ sync_jobs:
       enabled: true
       path: /mnt/backup_daily/.trash
       retention_days: 30
-  - name: music-backup2
+  - name: music-backup-weekly
     source: /mnt/primary/Music/
     dest: /mnt/backup_weekly/Music/
     schedule: '*-*-* *:00/10:00'
@@ -218,7 +218,7 @@ sync_jobs:
       enabled: true
       path: /mnt/backup_weekly/.trash
       retention_days: 30
-  - name: omv2-backup2
+  - name: omv2-backup-weekly
     source: /mnt/primary/omv2/
     dest: /mnt/backup_weekly/omv2/
     schedule: '*-*-* *:00/10:00'
@@ -229,7 +229,7 @@ sync_jobs:
       enabled: true
       path: /mnt/backup_weekly/.trash
       retention_days: 30
-  - name: photos-backup2
+  - name: photos-backup-weekly
     source: /mnt/primary/Photo_albums/
     dest: /mnt/backup_weekly/Photo_albums/
     schedule: '*-*-* *:00/10:00'
@@ -240,7 +240,7 @@ sync_jobs:
       enabled: true
       path: /mnt/backup_weekly/.trash
       retention_days: 30
-  - name: test-backup2
+  - name: test-backup-weekly
     source: /mnt/primary/test/
     dest: /mnt/backup_weekly/test/
     schedule: '*-*-* *:00/10:00'
@@ -251,7 +251,7 @@ sync_jobs:
       enabled: true
       path: /mnt/backup_weekly/.trash
       retention_days: 30
-  - name: videos-backup2
+  - name: videos-backup-weekly
     source: /mnt/primary/videos/
     dest: /mnt/backup_weekly/videos/
     schedule: '*-*-* *:00/10:00'
@@ -301,6 +301,10 @@ services:
 #     label: "Important file"
 #     events: [modify, delete, create]
 file_watch:
+  - path: /mnt/primary/NASe
+    label: NASe config notification
+    events:
+      - delete
   - path: /mnt/primary/omv2/NASe
     label: NASe notification
     events:
