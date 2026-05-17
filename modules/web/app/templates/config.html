@@ -51,44 +51,48 @@
         <input type="hidden" id="field-svc-fb-root">
         <div class="form-body">
 
-          <p class="form-section-head">Web Dashboard</p>
-          <div class="form-row">
-            <label class="form-label" for="field-svc-web-enabled">Enabled</label>
-            <div class="form-field">
-              <input class="form-checkbox" type="checkbox" id="field-svc-web-enabled">
+          <div class="form-subsection">
+            <p class="form-section-head">Web Dashboard</p>
+            <div class="form-row">
+              <label class="form-label" for="field-svc-web-enabled">Enabled</label>
+              <div class="form-field">
+                <input class="form-checkbox" type="checkbox" id="field-svc-web-enabled">
+              </div>
             </div>
-          </div>
-          <div class="form-row">
-            <label class="form-label" for="field-svc-web-port">Port</label>
-            <div class="form-field">
-              <input class="form-input form-input-sm" type="number" id="field-svc-web-port" min="1" max="65535">
+            <div class="form-row">
+              <label class="form-label" for="field-svc-web-port">Port</label>
+              <div class="form-field">
+                <input class="form-input form-input-sm" type="number" id="field-svc-web-port" min="1" max="65535">
+              </div>
             </div>
           </div>
 
-          <p class="form-section-head">File Browser</p>
-          <div class="form-row">
-            <label class="form-label" for="field-svc-fb-enabled">Enabled</label>
-            <div class="form-field">
-              <input class="form-checkbox" type="checkbox" id="field-svc-fb-enabled">
+          <div class="form-subsection">
+            <p class="form-section-head">File Browser</p>
+            <div class="form-row">
+              <label class="form-label" for="field-svc-fb-enabled">Enabled</label>
+              <div class="form-field">
+                <input class="form-checkbox" type="checkbox" id="field-svc-fb-enabled">
+              </div>
             </div>
-          </div>
-          <div class="form-row">
-            <label class="form-label" for="field-svc-fb-port">Port</label>
-            <div class="form-field">
-              <input class="form-input form-input-sm" type="number" id="field-svc-fb-port" min="1" max="65535">
+            <div class="form-row">
+              <label class="form-label" for="field-svc-fb-port">Port</label>
+              <div class="form-field">
+                <input class="form-input form-input-sm" type="number" id="field-svc-fb-port" min="1" max="65535">
+              </div>
             </div>
-          </div>
-          <div class="form-row">
-            <label class="form-label" for="field-svc-fb-username">Username</label>
-            <div class="form-field">
-              <input class="form-input" type="text" id="field-svc-fb-username">
+            <div class="form-row">
+              <label class="form-label" for="field-svc-fb-username">Username</label>
+              <div class="form-field">
+                <input class="form-input" type="text" id="field-svc-fb-username">
+              </div>
             </div>
-          </div>
-          <div class="form-row">
-            <label class="form-label" for="field-svc-fb-baseurl">Base URL</label>
-            <div class="form-field">
-              <input class="form-input" type="text" id="field-svc-fb-baseurl" placeholder="(empty for direct access)">
-              <span class="form-hint">Set only if served behind a reverse proxy, e.g. /files.</span>
+            <div class="form-row">
+              <label class="form-label" for="field-svc-fb-baseurl">Base URL</label>
+              <div class="form-field">
+                <input class="form-input" type="text" id="field-svc-fb-baseurl" placeholder="(empty for direct access)">
+                <span class="form-hint">Set only if served behind a reverse proxy, e.g. /files.</span>
+              </div>
             </div>
           </div>
 

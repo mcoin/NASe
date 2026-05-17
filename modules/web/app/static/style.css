@@ -396,15 +396,24 @@ td.mono  { font-family: monospace; font-size: 0.8rem; color: var(--muted); }
   color: var(--muted);
 }
 
+.form-subsection {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  padding: 0.9rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
 .form-section-head {
   font-size: 0.72rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--muted);
-  padding-bottom: 0.4rem;
+  padding-bottom: 0.5rem;
   border-bottom: 1px solid var(--border);
-  margin-top: 0.4rem;
 }
 
 .form-input-sm { max-width: 120px; }
