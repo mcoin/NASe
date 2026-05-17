@@ -426,6 +426,15 @@ td.mono  { font-family: monospace; font-size: 0.8rem; color: var(--muted); }
   margin-top: 0.35rem;
 }
 
+.form-check-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-right: 1rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
 /* ── Drive sub-tabs ──────────────────────────────────────────────────────── */
 .drive-tab-bar {
   display: flex;

@@ -59,7 +59,6 @@ drives:
 # --------------------------------------------------------------------------
 samba:
   workgroup: WORKGROUP
-  # Samba users — passwords are read from .env: SAMBA_PASSWORD_<NAME_UPPERCASED>
   users:
     - nase
   shares:
@@ -103,10 +102,6 @@ samba:
       path: /mnt/backup_weekly/.trash
       read_only: true
       valid_users: "nase"
-
-# --------------------------------------------------------------------------
-# Tailscale
-# --------------------------------------------------------------------------
 tailscale:
   enabled: true
   # Auth key is read from .env: TAILSCALE_AUTHKEY
@@ -128,7 +123,7 @@ tailscale:
 # --------------------------------------------------------------------------
 config_archive:
   dest: /mnt/primary/NASe
-  schedule: '*-*-* *:00/10:00'
+  schedule: '*-*-* *:00/05:00'
   retention_days: 90
   on_failure: notify
 sync_jobs:

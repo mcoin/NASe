@@ -18,7 +18,7 @@
           hx-target="#save-result-{{ key }}"
           hx-swap="innerHTML">
 
-      {% if key in ('nas', 'services', 'tailscale', 'notifications', 'drives') %}
+      {% if key in ('nas', 'services', 'tailscale', 'notifications', 'drives', 'samba', 'sync_jobs', 'config_archive', 'file_watch') %}
       <div class="view-toggle-bar">
         <div class="view-toggle">
           <button type="button" class="vt-btn vt-active" id="vt-yaml-{{ key }}" onclick="switchView('{{ key }}','yaml')">YAML</button>
@@ -165,8 +165,81 @@
       </div>
       {% endif %}
 
+      {% if key == 'samba' %}
+      <div class="form-view" id="form-view-samba" style="display:none">
+        <div class="form-body">
+          <div class="form-row">
+            <label class="form-label" for="field-smb-workgroup">Workgroup</label>
+            <div class="form-field">
+              <input class="form-input form-input-sm" type="text" id="field-smb-workgroup" placeholder="WORKGROUP">
+            </div>
+          </div>
+          <div class="form-row">
+            <label class="form-label" for="field-smb-users">Users</label>
+            <div class="form-field">
+              <input class="form-input" type="text" id="field-smb-users" placeholder="nase">
+              <span class="form-hint">Comma-separated. Passwords are set in .env as SAMBA_PASSWORD_&lt;NAME_UPPERCASED&gt;.</span>
+            </div>
+          </div>
+        </div>
+        <div class="drive-tab-bar" id="share-tab-bar"></div>
+        <div id="share-panels"></div>
+      </div>
+      {% endif %}
+
+      {% if key == 'sync_jobs' %}
+      <div class="form-view" id="form-view-sync_jobs" style="display:none">
+        <div class="drive-tab-bar" id="syncjob-tab-bar"></div>
+        <div id="syncjob-panels"></div>
+      </div>
+      {% endif %}
+
+      {% if key == 'config_archive' %}
+      <div class="form-view" id="form-view-config_archive" style="display:none">
+        <div class="form-body">
+          <div class="form-row">
+            <label class="form-label" for="field-ca-dest">Destination</label>
+            <div class="form-field">
+              <input class="form-input" type="text" id="field-ca-dest" placeholder="/mnt/primary/NASe">
+              <span class="form-hint">Directory where config.yaml and timestamped snapshots are written.</span>
+            </div>
+          </div>
+          <div class="form-row">
+            <label class="form-label" for="field-ca-schedule">Schedule</label>
+            <div class="form-field">
+              <input class="form-input" type="text" id="field-ca-schedule" placeholder="*-*-* *:00/10:00">
+              <span class="form-hint">systemd OnCalendar format, e.g. <code>*-*-* *:00/10:00</code> (every 10 minutes).</span>
+            </div>
+          </div>
+          <div class="form-row">
+            <label class="form-label" for="field-ca-retention">Retention (days)</label>
+            <div class="form-field">
+              <input class="form-input form-input-sm" type="number" min="1" id="field-ca-retention">
+              <span class="form-hint">Snapshots older than this are pruned automatically.</span>
+            </div>
+          </div>
+          <div class="form-row">
+            <label class="form-label" for="field-ca-on-failure">On failure</label>
+            <div class="form-field">
+              <select class="form-input form-select" id="field-ca-on-failure">
+                <option value="notify">notify</option>
+                <option value="ignore">ignore</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+
+      {% if key == 'file_watch' %}
+      <div class="form-view" id="form-view-file_watch" style="display:none">
+        <div class="drive-tab-bar" id="watch-tab-bar"></div>
+        <div id="watch-panels"></div>
+      </div>
+      {% endif %}
+
       <div class="editor-footer">
-        {% if key in ('nas', 'services', 'tailscale', 'notifications', 'drives') %}
+        {% if key in ('nas', 'services', 'tailscale', 'notifications', 'drives', 'samba', 'sync_jobs', 'config_archive', 'file_watch') %}
         <button type="submit" class="btn-save" onclick="beforeSave('{{ key }}')">Save {{ label }}</button>
         {% else %}
         <button type="submit" class="btn-save">Save {{ label }}</button>
@@ -271,6 +344,31 @@
       _drives = _parseDrivesYaml(yaml);
       _activeDriveIdx = 0;
       _driveRender();
+
+    } else if (key === "samba") {
+      var sp = _parseSambaYaml(yaml);
+      _setVal("field-smb-workgroup", sp.workgroup || "WORKGROUP");
+      _setVal("field-smb-users",     (sp.users || []).join(", "));
+      _shares = sp.shares || [];
+      _activeShareIdx = 0;
+      _shareRender();
+
+    } else if (key === "sync_jobs") {
+      _syncJobs = _parseSyncJobsYaml(yaml);
+      _activeSyncIdx = 0;
+      _syncRender();
+
+    } else if (key === "config_archive") {
+      var d = _parseFlat(yaml);
+      _setVal("field-ca-dest",       d.dest           || "");
+      _setVal("field-ca-schedule",   d.schedule       || "");
+      _setVal("field-ca-retention",  d.retention_days || "");
+      _setVal("field-ca-on-failure", d.on_failure     || "notify");
+
+    } else if (key === "file_watch") {
+      _watches = _parseFileWatchYaml(yaml);
+      _activeWatchIdx = 0;
+      _watchRender();
     }
   }
 
@@ -314,6 +412,24 @@
     } else if (key === "drives") {
       _driveSavePanel(_activeDriveIdx);
       return _marshalDrivesYaml();
+
+    } else if (key === "samba") {
+      _shareSavePanel(_activeShareIdx);
+      return _marshalSambaYaml();
+
+    } else if (key === "sync_jobs") {
+      _syncSavePanel(_activeSyncIdx);
+      return _marshalSyncJobsYaml();
+
+    } else if (key === "config_archive") {
+      return "dest: "           + document.getElementById("field-ca-dest").value.trim()       + "\n"
+           + "schedule: '"      + document.getElementById("field-ca-schedule").value.trim()   + "'\n"
+           + "retention_days: " + document.getElementById("field-ca-retention").value.trim()  + "\n"
+           + "on_failure: "     + document.getElementById("field-ca-on-failure").value        + "\n";
+
+    } else if (key === "file_watch") {
+      _watchSavePanel(_activeWatchIdx);
+      return _marshalFileWatchYaml();
     }
   }
 
@@ -508,9 +624,505 @@
     _driveRender();
   }
 
+  // ── Samba: state + helpers ───────────────────────────────────────────────
+  var _shares = [];
+  var _activeShareIdx = 0;
+
+  function _parseSambaYaml(yaml) {
+    var result = { workgroup: "", users: [], shares: [] };
+    var lines = yaml.split("\n");
+    var inUsers = false, inShares = false, current = null;
+    lines.forEach(function(line) {
+      var indent = line.match(/^(\s*)/)[1].length;
+      var t = line.trim();
+      if (!t || t.startsWith("#")) { inUsers = false; return; }
+
+      if (indent === 0) {
+        inUsers = false; inShares = false;
+        var kv = t.match(/^(\w+):\s*(.*)/);
+        if (!kv) return;
+        if (kv[1] === "workgroup") { result.workgroup = kv[2].replace(/^["']|["']$/g, ""); }
+        else if (kv[1] === "users")  { inUsers = true; }
+        else if (kv[1] === "shares") { inShares = true; if (current) { result.shares.push(current); current = null; } }
+        return;
+      }
+
+      if (inUsers && indent >= 2) {
+        var um = t.match(/^-\s+(.*)/);
+        if (um) result.users.push(um[1].replace(/^["']|["']$/g, "").trim());
+        return;
+      }
+
+      if (inShares) {
+        var sm = line.match(/^\s*-\s+name:\s*(.*)/);
+        if (sm) {
+          if (current) result.shares.push(current);
+          current = { name: sm[1].replace(/^["']|["']$/g, "").trim() };
+          return;
+        }
+        if (current) {
+          var kv2 = line.match(/^\s+(\w+):\s*(.*)/);
+          if (kv2) current[kv2[1]] = kv2[2].replace(/^["']|["']$/g, "").trim();
+        }
+      }
+    });
+    if (current) result.shares.push(current);
+    return result;
+  }
+
+  function _marshalSambaYaml() {
+    var workgroup = document.getElementById("field-smb-workgroup").value.trim() || "WORKGROUP";
+    var usersRaw  = document.getElementById("field-smb-users").value.trim();
+    var users     = usersRaw ? usersRaw.split(",").map(function(u) { return u.trim(); }).filter(Boolean) : [];
+    var lines = [];
+    lines.push("workgroup: " + workgroup);
+    lines.push("users:");
+    users.forEach(function(u) { lines.push("  - " + u); });
+    lines.push("shares:");
+    _shares.forEach(function(s) {
+      lines.push("  - name: "        + (s.name        || ""));
+      lines.push("    path: "        + (s.path        || ""));
+      lines.push("    read_only: "   + (s.read_only   === "true" ? "true" : "false"));
+      lines.push('    valid_users: "' + (s.valid_users || "") + '"');
+    });
+    return lines.join("\n") + "\n";
+  }
+
+  function _shareSavePanel(i) {
+    var s = _shares[i];
+    if (!s) return;
+    function _g(f)  { var el = document.getElementById("share-"+i+"-"+f); return el ? el.value.trim() : ""; }
+    function _gc(f) { var el = document.getElementById("share-"+i+"-"+f); return el ? String(el.checked) : "false"; }
+    s.name        = _g("name");
+    s.path        = _g("path");
+    s.read_only   = _gc("read_only");
+    s.valid_users = _g("valid_users");
+  }
+
+  function _sharePanelHTML(s, i) {
+    function e(v) { return String(v||"").replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+    var ro = s.read_only === "true" || s.read_only === true;
+    return '<div class="form-body">'
+      + '<div class="form-row"><label class="form-label" for="share-'+i+'-name">Name</label>'
+      + '<div class="form-field"><input class="form-input" id="share-'+i+'-name" type="text" value="'+e(s.name)+'" oninput="_shareTabLabel('+i+',this.value)">'
+      + '<span class="form-hint">Share name as it appears on the network.</span></div></div>'
+
+      + '<div class="form-row"><label class="form-label" for="share-'+i+'-path">Path</label>'
+      + '<div class="form-field"><input class="form-input" id="share-'+i+'-path" type="text" value="'+e(s.path)+'" placeholder="/mnt/primary/...">'
+      + '</div></div>'
+
+      + '<div class="form-row"><label class="form-label" for="share-'+i+'-valid_users">Valid users</label>'
+      + '<div class="form-field"><input class="form-input form-input-sm" id="share-'+i+'-valid_users" type="text" value="'+e(s.valid_users)+'">'
+      + '<span class="form-hint">Space-separated Samba usernames allowed to connect.</span></div></div>'
+
+      + '<div class="form-row"><label class="form-label" for="share-'+i+'-read_only">Read-only</label>'
+      + '<div class="form-field"><input class="form-checkbox" id="share-'+i+'-read_only" type="checkbox"'+(ro?" checked":"")+'>'
+      + '<span class="form-hint">Clients cannot write to this share.</span></div></div>'
+
+      + '<div class="form-row"><label class="form-label"></label>'
+      + '<div class="form-field"><button type="button" class="btn-remove" onclick="_shareRemove('+i+')">Remove this share</button></div></div>'
+      + '</div>';
+  }
+
+  function _shareRender() {
+    var bar    = document.getElementById("share-tab-bar");
+    var panels = document.getElementById("share-panels");
+    if (!bar || !panels) return;
+    bar.innerHTML    = "";
+    panels.innerHTML = "";
+    _shares.forEach(function(s, i) {
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "drive-tab-btn" + (i === _activeShareIdx ? " active" : "");
+      btn.id        = "share-tab-" + i;
+      btn.textContent = s.name || ("share " + (i + 1));
+      btn.onclick = (function(idx) {
+        return function() {
+          if (idx === _activeShareIdx) return;
+          _shareSavePanel(_activeShareIdx);
+          _activeShareIdx = idx;
+          _shareRender();
+        };
+      })(i);
+      bar.appendChild(btn);
+    });
+    var addBtn = document.createElement("button");
+    addBtn.type = "button";
+    addBtn.className = "drive-add-btn";
+    addBtn.textContent = "+ Add";
+    addBtn.onclick = _shareAdd;
+    bar.appendChild(addBtn);
+
+    _shares.forEach(function(s, i) {
+      var panel = document.createElement("div");
+      panel.id = "share-panel-" + i;
+      panel.className = "drive-panel" + (i === _activeShareIdx ? " active" : "");
+      panel.innerHTML = _sharePanelHTML(s, i);
+      panels.appendChild(panel);
+    });
+  }
+
+  function _shareTabLabel(i, val) {
+    var btn = document.getElementById("share-tab-" + i);
+    if (btn) btn.textContent = val || ("share " + (i + 1));
+  }
+
+  function _shareAdd() {
+    _shareSavePanel(_activeShareIdx);
+    _shares.push({ name: "", path: "", read_only: "false", valid_users: "nase" });
+    _activeShareIdx = _shares.length - 1;
+    _shareRender();
+  }
+
+  function _shareRemove(i) {
+    if (_shares.length <= 1) return;
+    _shares.splice(i, 1);
+    if (_activeShareIdx >= _shares.length) _activeShareIdx = _shares.length - 1;
+    _shareRender();
+  }
+
+  // ── Sync Jobs: state + helpers ───────────────────────────────────────────
+  var _syncJobs = [];
+  var _activeSyncIdx = 0;
+
+  function _parseSyncJobsYaml(yaml) {
+    var jobs = [];
+    var current = null;
+    var inTrash = false;
+    yaml.split("\n").forEach(function(line) {
+      var m = line.match(/^\s*-\s+name:\s*(.*)/);
+      if (m) {
+        if (current) jobs.push(current);
+        current = { name: m[1].replace(/^["']|["']$/g, "").trim(), trash: {} };
+        inTrash = false;
+        return;
+      }
+      if (!current) return;
+      if (line.match(/^\s{4}trash:/)) { inTrash = true; return; }
+      if (inTrash) {
+        var tkv = line.match(/^\s{6}(\w+):\s*(.*)/);
+        if (tkv) { current.trash[tkv[1]] = tkv[2].replace(/^["']|["']$/g, "").trim(); return; }
+        inTrash = false;
+      }
+      var kv = line.match(/^\s{4}(\w+):\s*(.*)/);
+      if (kv) current[kv[1]] = kv[2].replace(/^["']|["']$/g, "").trim();
+    });
+    if (current) jobs.push(current);
+    return jobs;
+  }
+
+  function _marshalSyncJobsYaml() {
+    return _syncJobs.map(function(j) {
+      var trashEnabled = j.trash && j.trash.enabled === "true";
+      var lines = [];
+      lines.push("- name: "           + (j.name           || ""));
+      lines.push("  source: "         + (j.source         || ""));
+      lines.push("  dest: "           + (j.dest           || ""));
+      lines.push("  schedule: '"      + (j.schedule       || "") + "'");
+      lines.push("  rsync_flags: "    + (j.rsync_flags    || "--archive --delete"));
+      lines.push("  on_failure: "     + (j.on_failure     || "notify"));
+      lines.push("  force_sync_days: "+ (parseInt(j.force_sync_days, 10) || 7));
+      lines.push("  trash:");
+      lines.push("    enabled: "      + (trashEnabled ? "true" : "false"));
+      if (trashEnabled) {
+        lines.push("    path: "           + (j.trash.path           || ""));
+        lines.push("    retention_days: " + (parseInt(j.trash.retention_days, 10) || 30));
+      }
+      return lines.join("\n");
+    }).join("\n") + "\n";
+  }
+
+  function _syncSavePanel(i) {
+    var j = _syncJobs[i];
+    if (!j) return;
+    function _g(f)  { var el = document.getElementById("sync-"+i+"-"+f); return el ? el.value.trim() : ""; }
+    function _gc(f) { var el = document.getElementById("sync-"+i+"-"+f); return el ? String(el.checked) : "false"; }
+    j.name           = _g("name");
+    j.source         = _g("source");
+    j.dest           = _g("dest");
+    j.schedule       = _g("schedule");
+    j.rsync_flags    = _g("rsync_flags");
+    j.on_failure     = _g("on_failure");
+    j.force_sync_days= _g("force_sync_days");
+    if (!j.trash) j.trash = {};
+    j.trash.enabled        = _gc("trash-enabled");
+    j.trash.path           = _g("trash-path");
+    j.trash.retention_days = _g("trash-retention_days");
+  }
+
+  function _syncPanelHTML(j, i) {
+    function e(v) { return String(v||"").replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+    var trashEnabled = j.trash && (j.trash.enabled === "true");
+    var failSel = function(v) {
+      return '<option value="notify"'+(j.on_failure==="notify"?" selected":"")+'>notify</option>'
+           + '<option value="ignore"'+(j.on_failure==="ignore"?" selected":"")+'>ignore</option>';
+    };
+    return '<div class="form-body">'
+      + '<div class="form-row"><label class="form-label" for="sync-'+i+'-name">Name</label>'
+      + '<div class="form-field"><input class="form-input" id="sync-'+i+'-name" type="text" value="'+e(j.name)+'" oninput="_syncTabLabel('+i+',this.value)">'
+      + '<span class="form-hint">Used for the systemd unit name and log file.</span></div></div>'
+
+      + '<div class="form-row"><label class="form-label" for="sync-'+i+'-source">Source</label>'
+      + '<div class="form-field"><input class="form-input" id="sync-'+i+'-source" type="text" value="'+e(j.source)+'" placeholder="/mnt/primary/.../">'
+      + '<span class="form-hint">Trailing slash required — rsync copies contents, not the directory itself.</span></div></div>'
+
+      + '<div class="form-row"><label class="form-label" for="sync-'+i+'-dest">Destination</label>'
+      + '<div class="form-field"><input class="form-input" id="sync-'+i+'-dest" type="text" value="'+e(j.dest)+'" placeholder="/mnt/backup_daily/.../">'
+      + '</div></div>'
+
+      + '<div class="form-row"><label class="form-label" for="sync-'+i+'-schedule">Schedule</label>'
+      + '<div class="form-field"><input class="form-input" id="sync-'+i+'-schedule" type="text" value="'+e(j.schedule)+'" placeholder="*-*-* *:00/01:00">'
+      + '<span class="form-hint">systemd OnCalendar format, e.g. <code>*-*-* *:00/01:00</code> (every minute past the hour).</span></div></div>'
+
+      + '<div class="form-row"><label class="form-label" for="sync-'+i+'-rsync_flags">rsync flags</label>'
+      + '<div class="form-field"><input class="form-input" id="sync-'+i+'-rsync_flags" type="text" value="'+e(j.rsync_flags||"--archive --delete")+'">'
+      + '</div></div>'
+
+      + '<div class="form-row"><label class="form-label" for="sync-'+i+'-on_failure">On failure</label>'
+      + '<div class="form-field"><select class="form-input form-select" id="sync-'+i+'-on_failure">'+failSel()+'</select>'
+      + '</div></div>'
+
+      + '<div class="form-row"><label class="form-label" for="sync-'+i+'-force_sync_days">Force sync (days)</label>'
+      + '<div class="form-field"><input class="form-input form-input-sm" id="sync-'+i+'-force_sync_days" type="number" min="1" value="'+e(j.force_sync_days||"7")+'">'
+      + '<span class="form-hint">Run a full sync even without changes after this many days.</span></div></div>'
+
+      + '<div class="form-subsection">'
+      + '<p class="form-section-head">Trash</p>'
+      + '<div class="form-row"><label class="form-label" for="sync-'+i+'-trash-enabled">Enabled</label>'
+      + '<div class="form-field"><input class="form-checkbox" id="sync-'+i+'-trash-enabled" type="checkbox"'+(trashEnabled?" checked":"")
+      + ' onchange="_syncTrashToggle('+i+')">'
+      + '<span class="form-hint">Move deleted files to a timestamped trash directory instead of deleting them.</span></div></div>'
+      + '<div id="sync-'+i+'-trash-rows" style="'+(trashEnabled?"":"display:none")+'">'
+      + '<div class="form-row"><label class="form-label" for="sync-'+i+'-trash-path">Trash path</label>'
+      + '<div class="form-field"><input class="form-input" id="sync-'+i+'-trash-path" type="text" value="'+e((j.trash&&j.trash.path)||"")+'" placeholder="/mnt/backup_daily/.trash">'
+      + '</div></div>'
+      + '<div class="form-row"><label class="form-label" for="sync-'+i+'-trash-retention_days">Retention (days)</label>'
+      + '<div class="form-field"><input class="form-input form-input-sm" id="sync-'+i+'-trash-retention_days" type="number" min="1" value="'+e((j.trash&&j.trash.retention_days)||"30")+'">'
+      + '</div></div>'
+      + '</div>'
+      + '</div>'
+
+      + '<div class="form-row"><label class="form-label"></label>'
+      + '<div class="form-field"><button type="button" class="btn-remove" onclick="_syncRemove('+i+')">Remove this job</button></div></div>'
+      + '</div>';
+  }
+
+  function _syncTrashToggle(i) {
+    var cb   = document.getElementById("sync-"+i+"-trash-enabled");
+    var rows = document.getElementById("sync-"+i+"-trash-rows");
+    if (rows) rows.style.display = cb && cb.checked ? "" : "none";
+  }
+
+  function _syncRender() {
+    var bar    = document.getElementById("syncjob-tab-bar");
+    var panels = document.getElementById("syncjob-panels");
+    if (!bar || !panels) return;
+    bar.innerHTML    = "";
+    panels.innerHTML = "";
+    _syncJobs.forEach(function(j, i) {
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "drive-tab-btn" + (i === _activeSyncIdx ? " active" : "");
+      btn.id        = "sync-tab-" + i;
+      btn.textContent = j.name || ("job " + (i + 1));
+      btn.onclick = (function(idx) {
+        return function() {
+          if (idx === _activeSyncIdx) return;
+          _syncSavePanel(_activeSyncIdx);
+          _activeSyncIdx = idx;
+          _syncRender();
+        };
+      })(i);
+      bar.appendChild(btn);
+    });
+    var addBtn = document.createElement("button");
+    addBtn.type = "button";
+    addBtn.className = "drive-add-btn";
+    addBtn.textContent = "+ Add";
+    addBtn.onclick = _syncAdd;
+    bar.appendChild(addBtn);
+
+    _syncJobs.forEach(function(j, i) {
+      var panel = document.createElement("div");
+      panel.id = "syncjob-panel-" + i;
+      panel.className = "drive-panel" + (i === _activeSyncIdx ? " active" : "");
+      panel.innerHTML = _syncPanelHTML(j, i);
+      panels.appendChild(panel);
+    });
+  }
+
+  function _syncTabLabel(i, val) {
+    var btn = document.getElementById("sync-tab-" + i);
+    if (btn) btn.textContent = val || ("job " + (i + 1));
+  }
+
+  function _syncAdd() {
+    _syncSavePanel(_activeSyncIdx);
+    _syncJobs.push({ name: "", source: "", dest: "", schedule: "*-*-* *:00/01:00",
+                     rsync_flags: "--archive --delete", on_failure: "notify",
+                     force_sync_days: "7", trash: { enabled: "false", path: "", retention_days: "30" } });
+    _activeSyncIdx = _syncJobs.length - 1;
+    _syncRender();
+  }
+
+  function _syncRemove(i) {
+    if (_syncJobs.length <= 1) return;
+    _syncJobs.splice(i, 1);
+    if (_activeSyncIdx >= _syncJobs.length) _activeSyncIdx = _syncJobs.length - 1;
+    _syncRender();
+  }
+
+  // ── File Watch: state + helpers ─────────────────────────────────────────
+  var _watches = [];
+  var _activeWatchIdx = 0;
+
+  function _parseFileWatchYaml(yaml) {
+    var entries = [];
+    var current = null;
+    var inEvents = false;
+    yaml.split("\n").forEach(function(line) {
+      var m = line.match(/^\s*-\s+path:\s*(.*)/);
+      if (m) {
+        if (current) entries.push(current);
+        current = { path: m[1].replace(/^["']|["']$/g, "").trim(), label: "", events: [] };
+        inEvents = false;
+        return;
+      }
+      if (!current) return;
+      if (line.match(/^\s+events:/)) { inEvents = true; return; }
+      if (inEvents) {
+        var ev = line.match(/^\s+-\s+(.*)/);
+        if (ev) { current.events.push(ev[1].trim()); return; }
+        inEvents = false;
+      }
+      var kv = line.match(/^\s+(\w+):\s*(.*)/);
+      if (kv) current[kv[1]] = kv[2].replace(/^["']|["']$/g, "").trim();
+    });
+    if (current) entries.push(current);
+    return entries;
+  }
+
+  function _marshalFileWatchYaml() {
+    if (_watches.length === 0) return "[]\n";
+    return _watches.map(function(w) {
+      var lines = [];
+      lines.push("- path: "  + (w.path  || ""));
+      lines.push("  label: " + (w.label || ""));
+      lines.push("  events:");
+      (w.events || []).forEach(function(ev) { lines.push("    - " + ev); });
+      return lines.join("\n");
+    }).join("\n") + "\n";
+  }
+
+  function _watchSavePanel(i) {
+    var w = _watches[i];
+    if (!w) return;
+    function _g(f) { var el = document.getElementById("watch-"+i+"-"+f); return el ? el.value.trim() : ""; }
+    function _gc(f) { var el = document.getElementById("watch-"+i+"-"+f); return el ? el.checked : false; }
+    w.path  = _g("path");
+    w.label = _g("label");
+    w.events = [];
+    if (_gc("ev-modify")) w.events.push("modify");
+    if (_gc("ev-delete")) w.events.push("delete");
+    if (_gc("ev-create")) w.events.push("create");
+  }
+
+  function _watchPanelHTML(w, i) {
+    function e(v) { return String(v||"").replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+    var evs = w.events || [];
+    var chkModify = evs.indexOf("modify") >= 0;
+    var chkDelete = evs.indexOf("delete") >= 0;
+    var chkCreate = evs.indexOf("create") >= 0;
+    return '<div class="form-body">'
+      + '<div class="form-row"><label class="form-label" for="watch-'+i+'-path">Path</label>'
+      + '<div class="form-field"><input class="form-input" id="watch-'+i+'-path" type="text" value="'+e(w.path)+'" oninput="_watchTabLabel('+i+',this.value)">'
+      + '<span class="form-hint">File or directory to watch (absolute path).</span></div></div>'
+
+      + '<div class="form-row"><label class="form-label" for="watch-'+i+'-label">Label</label>'
+      + '<div class="form-field"><input class="form-input" id="watch-'+i+'-label" type="text" value="'+e(w.label)+'">'
+      + '<span class="form-hint">Used in the notification subject line.</span></div></div>'
+
+      + '<div class="form-row"><label class="form-label">Events</label>'
+      + '<div class="form-field">'
+      + '<label class="form-check-label"><input class="form-checkbox" id="watch-'+i+'-ev-modify" type="checkbox"'+(chkModify?" checked":"")+'>modify</label>'
+      + '<label class="form-check-label"><input class="form-checkbox" id="watch-'+i+'-ev-delete" type="checkbox"'+(chkDelete?" checked":"")+'>delete</label>'
+      + '<label class="form-check-label"><input class="form-checkbox" id="watch-'+i+'-ev-create" type="checkbox"'+(chkCreate?" checked":"")+'>create</label>'
+      + '<span class="form-hint">A 60-second cooldown prevents notification floods.</span>'
+      + '</div></div>'
+
+      + '<div class="form-row"><label class="form-label"></label>'
+      + '<div class="form-field"><button type="button" class="btn-remove" onclick="_watchRemove('+i+')">Remove this entry</button></div></div>'
+      + '</div>';
+  }
+
+  function _watchRender() {
+    var bar    = document.getElementById("watch-tab-bar");
+    var panels = document.getElementById("watch-panels");
+    if (!bar || !panels) return;
+    bar.innerHTML    = "";
+    panels.innerHTML = "";
+    _watches.forEach(function(w, i) {
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "drive-tab-btn" + (i === _activeWatchIdx ? " active" : "");
+      btn.id        = "watch-tab-" + i;
+      btn.textContent = _watchShortLabel(w, i);
+      btn.onclick = (function(idx) {
+        return function() {
+          if (idx === _activeWatchIdx) return;
+          _watchSavePanel(_activeWatchIdx);
+          _activeWatchIdx = idx;
+          _watchRender();
+        };
+      })(i);
+      bar.appendChild(btn);
+    });
+    var addBtn = document.createElement("button");
+    addBtn.type = "button";
+    addBtn.className = "drive-add-btn";
+    addBtn.textContent = "+ Add";
+    addBtn.onclick = _watchAdd;
+    bar.appendChild(addBtn);
+
+    _watches.forEach(function(w, i) {
+      var panel = document.createElement("div");
+      panel.id = "watch-panel-" + i;
+      panel.className = "drive-panel" + (i === _activeWatchIdx ? " active" : "");
+      panel.innerHTML = _watchPanelHTML(w, i);
+      panels.appendChild(panel);
+    });
+  }
+
+  function _watchShortLabel(w, i) {
+    if (!w.path) return "watch " + (i + 1);
+    var parts = w.path.replace(/\/$/, "").split("/");
+    return parts[parts.length - 1] || "watch " + (i + 1);
+  }
+
+  function _watchTabLabel(i, val) {
+    var btn = document.getElementById("watch-tab-" + i);
+    if (!btn) return;
+    var parts = val.replace(/\/$/, "").split("/");
+    btn.textContent = parts[parts.length - 1] || ("watch " + (i + 1));
+  }
+
+  function _watchAdd() {
+    _watchSavePanel(_activeWatchIdx);
+    _watches.push({ path: "", label: "", events: ["modify", "delete"] });
+    _activeWatchIdx = _watches.length - 1;
+    _watchRender();
+  }
+
+  function _watchRemove(i) {
+    if (_watches.length <= 1) return;
+    _watches.splice(i, 1);
+    if (_activeWatchIdx >= _watches.length) _activeWatchIdx = _watches.length - 1;
+    _watchRender();
+  }
+
   // Clear save banner on any input inside a form view
   document.addEventListener("DOMContentLoaded", function() {
-    ["nas", "services", "tailscale", "notifications", "drives"].forEach(function(key) {
+    ["nas", "services", "tailscale", "notifications", "drives", "samba", "sync_jobs", "config_archive", "file_watch"].forEach(function(key) {
       var fv = document.getElementById("form-view-" + key);
       if (fv) fv.addEventListener("input", function() {
         document.getElementById("save-result-" + key).innerHTML = "";
