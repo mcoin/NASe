@@ -330,3 +330,14 @@ file_watch:
 notifications:
   method: email
   email: thomas.vettorel+NASe@gmail.com
+
+# --------------------------------------------------------------------------
+# Status report
+# --------------------------------------------------------------------------
+# Sends a periodic notification summarising system health and all file
+# operations (synced / trashed) that occurred since the last report.
+# schedule: systemd OnCalendar format (default: every Saturday at 3 AM)
+# --------------------------------------------------------------------------
+status_report:
+  enabled: true
+  schedule: 'Sat *-*-* 03:00:00'

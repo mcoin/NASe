@@ -158,6 +158,19 @@ if [[ "$method" != "email" && "$method" != "webhook" && "$method" != "none" && -
     fail ".notifications.method must be 'email', 'webhook', or 'none' (got: '${method}')."
 fi
 
+# ── status_report section ────────────────────────────────────────────────────
+sr_enabled=$(config_get '.status_report.enabled // "true"')
+sr_schedule=$(config_get '.status_report.schedule // ""')
+
+if [[ -n "$sr_enabled" && "$sr_enabled" != "true" && "$sr_enabled" != "false" ]]; then
+    fail ".status_report.enabled must be 'true' or 'false' (got: '${sr_enabled}')."
+fi
+if [[ -n "$sr_schedule" ]] && command -v systemd-analyze &>/dev/null; then
+    if ! systemd-analyze calendar "$sr_schedule" &>/dev/null; then
+        fail ".status_report.schedule '${sr_schedule}' is not a valid systemd OnCalendar expression."
+    fi
+fi
+
 # ── Result ────────────────────────────────────────────────────────────────────
 if [[ "$errors" -gt 0 ]]; then
     die "config.yaml validation failed with ${errors} error(s)."

@@ -235,6 +235,26 @@
       </div>
       {% endif %}
 
+      {% if key == 'status_report' %}
+      <div class="form-view" id="form-view-status_report">
+        <div class="form-body">
+          <div class="form-row">
+            <label class="form-label" for="field-sr-enabled">Enabled</label>
+            <div class="form-field">
+              <input class="form-checkbox" type="checkbox" id="field-sr-enabled">
+            </div>
+          </div>
+          <div class="form-row">
+            <label class="form-label" for="field-sr-schedule">Schedule</label>
+            <div class="form-field">
+              <input class="form-input" type="text" id="field-sr-schedule" placeholder="Sat *-*-* 03:00:00">
+              <span class="form-hint">systemd OnCalendar format. Default: every Saturday at 3 AM (<code>Sat *-*-* 03:00:00</code>).</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+
       <div class="editor-footer">
         <button type="submit" class="btn-save" onclick="beforeSave('{{ key }}')">Save {{ label }}</button>
         <button type="button" class="btn-apply" onclick="runApply('{{ key }}')">Apply {{ label }}</button>
@@ -365,6 +385,11 @@
       _watches = _parseFileWatchYaml(yaml);
       _activeWatchIdx = 0;
       _watchRender();
+
+    } else if (key === "status_report") {
+      var d = _parseFlat(yaml);
+      _setCheck("field-sr-enabled",  d.enabled !== "false");
+      _setVal("field-sr-schedule",   d.schedule || "Sat *-*-* 03:00:00");
     }
   }
 
@@ -426,6 +451,12 @@
     } else if (key === "file_watch") {
       _watchSavePanel(_activeWatchIdx);
       return _marshalFileWatchYaml();
+
+    } else if (key === "status_report") {
+      var srEnabled  = document.getElementById("field-sr-enabled").checked;
+      var srSchedule = document.getElementById("field-sr-schedule").value.trim();
+      return "enabled: " + srEnabled + "\n"
+           + "schedule: '" + srSchedule + "'\n";
     }
   }
 
@@ -1122,7 +1153,7 @@
     if (initYaml) populateForm(_activeTab, initYaml.value);
 
     // Clear save banner on any input inside a form view
-    ["nas", "services", "tailscale", "notifications", "drives", "samba", "sync_jobs", "config_archive", "file_watch"].forEach(function(key) {
+    ["nas", "services", "tailscale", "notifications", "drives", "samba", "sync_jobs", "config_archive", "file_watch", "status_report"].forEach(function(key) {
       var fv = document.getElementById("form-view-" + key);
       if (fv) fv.addEventListener("input", function() {
         document.getElementById("save-result-" + key).innerHTML = "";

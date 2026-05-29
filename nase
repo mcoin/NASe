@@ -456,12 +456,26 @@ cmd_apply() {
             _apply_preflight
             _run_module watch
             ;;
+        status-report|status_report)
+            _apply_preflight
+            _run_module status-report
+            ;;
         *)
             log_error "Unknown section: '${section}'"
-            log_info "Valid sections: nas, drives, samba, sync, config-archive, services, tailscale, notifications, watch"
+            log_info "Valid sections: nas, drives, samba, sync, config-archive, services, tailscale, notifications, watch, status-report"
             exit 1
             ;;
     esac
+}
+
+# ── report ────────────────────────────────────────────────────────────────────
+
+cmd_report() {
+    if [[ -f "${REPO_ROOT}/.env" ]]; then
+        set -a; source "${REPO_ROOT}/.env"; set +a
+    fi
+    log_info "Generating and sending status report now..."
+    exec "${REPO_ROOT}/modules/status-report/report.sh"
 }
 
 # ── notify-test ───────────────────────────────────────────────────────────────
@@ -497,6 +511,7 @@ ${_C_BOLD}Commands:${_C_RST}
                             (no job = central log, job name = that job's rsync log)
   web-restart             Restart the web dashboard service
   notify-test             Send a test notification via the configured method
+  report                  Send a status report immediately (for testing)
 
   apply [<section>]       Apply config to a specific module (or all if omitted)
     nas                     Set hostname
@@ -507,6 +522,7 @@ ${_C_BOLD}Commands:${_C_RST}
     services                Web dashboard + filebrowser [prereq: drives]
     tailscale               Tailscale VPN
     notifications           Validate only (config read at runtime)
+    status-report           Status report timer
 
 ${_C_BOLD}Examples:${_C_RST}
   nase status
@@ -536,6 +552,7 @@ case "$CMD" in
     logs)        cmd_logs "$@" ;;
     web-restart) check_root; cmd_web_restart ;;
     notify-test) check_root; cmd_notify_test ;;
+    report)      check_root; cmd_report ;;
     apply)       check_root; cmd_apply "$@" ;;
     help|--help|-h|"") usage ;;
     *) log_error "Unknown command: '${CMD}'"; usage; exit 1 ;;

@@ -202,6 +202,7 @@ CONFIG_SECTIONS: list[tuple[str, str]] = [
     ("tailscale",      "Tailscale"),
     ("notifications",  "Notifications"),
     ("file_watch",     "File Watch"),
+    ("status_report",  "Status Report"),
 ]
 _SECTION_KEYS = {k for k, _ in CONFIG_SECTIONS}
 
@@ -317,6 +318,7 @@ _SECTION_APPLY_ARG: dict[str, str] = {
     "tailscale":      "tailscale",
     "notifications":  "notifications",
     "file_watch":     "watch",
+    "status_report":  "status-report",
 }
 
 def _stream_cmd(*cmd: str) -> StreamingResponse:
