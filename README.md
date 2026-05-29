@@ -30,7 +30,7 @@ sudo ./apply.sh
 
 ## Requirements
 
-- Raspberry Pi running Raspberry Pi OS Bookworm or Bullseye (64- or 32-bit)
+- Raspberry Pi running Raspberry Pi OS Bookworm or later, or Debian 12+ (64- or 32-bit)
 - Python 3.9 or newer (installed by `install.sh` if missing)
 - USB drives physically attached; their UUIDs noted for `config.yaml`
 - Internet access during install (packages + Tailscale)
