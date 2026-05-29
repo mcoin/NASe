@@ -27,6 +27,11 @@ PACKAGES=(
     # Samba
     samba
     samba-common-bin
+    # Python (web dashboard)
+    python3
+    python3-venv
+    # File watch notifications
+    inotify-tools
     # Utilities used by scripts
     curl
     wget
