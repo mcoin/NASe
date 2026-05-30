@@ -110,6 +110,21 @@ fi
 dest_mount=$(findmnt --target "$dest_parent" --output TARGET --noheadings --first-only)
 [[ -n "$dest_mount" ]] || die "Could not determine mountpoint for '${dest_parent}'."
 
+# ── Serialize access to the destination drive ────────────────────────────────
+# Multiple sync jobs may target the same backup drive (e.g. several weekly
+# jobs all fire at :00/:10/:20).  Without a lock, the first job to finish
+# remounts the drive ro in its EXIT trap while a sibling's rsync is still
+# writing — producing "Read-only file system" errors and rsync exit 23.
+# An exclusive flock on a per-drive file serialises the
+# remount-rw → rsync → remount-ro cycle.  The lock is released automatically
+# when the process exits (FD close), which happens after the EXIT trap runs,
+# so the next job never starts before this one has restored the drive to ro.
+_lock_name="${dest_mount:1}"
+_lock_name="${_lock_name//\//-}"
+_lock_file="${STAMP_DIR}/drive-${_lock_name}.lock"
+exec {_DRIVE_LOCK_FD}>"$_lock_file"
+flock --exclusive "$_DRIVE_LOCK_FD"
+
 dest_is_ro=$(findmnt --target "$dest_parent" --output OPTIONS --noheadings --first-only \
     | grep -qw ro && echo true || echo false)
 

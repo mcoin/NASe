@@ -65,6 +65,7 @@ if config_bool '.services.filebrowser.enabled'; then
 fi
 
 run_module watch
+run_module primary-watch
 run_module status-report
 
 # ── Install repo-provided systemd units ──────────────────────────────────────

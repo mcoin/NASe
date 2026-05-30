@@ -94,63 +94,69 @@ if [[ $error_count -gt 0 ]]; then
     anomalies+=("${error_count} error(s) in log since last report")
 fi
 
-# ── Parse file operations from central log ────────────────────────────────────
-# Looks for lines between "Starting sync job 'X'" and "Sync job 'X' completed/failed",
-# extracting "  synced:  FILE" and "  trashed: FILE" entries.
-# Output: timestamp TAB job TAB op TAB filename, sorted by job then time.
+# ── Parse file changes from primary events log ────────────────────────────────
+# Reads /var/lib/nase/primary-events.log (written by nase-primary-watch.service).
+# Deduplicates by path: each file appears once, with the most recent operation
+# and a (×N) annotation when it was touched more than once in the period.
+# Output: timestamp TAB share TAB op TAB rel-path TAB count,
+#         sorted by share then most-recent-first.
 ops_tsv=""
-if [[ -f "$LOG_FILE" ]]; then
-    ops_tsv=$(awk -v since="$since_str" -v Q="'" '
-        BEGIN { job = "" }
-        { ts = $1 " " $2; if (ts < since) next }
-        index($0, "[INFO ] Starting sync job " Q) {
-            n = index($0, "sync job " Q)
-            if (n > 0) {
-                rest = substr($0, n + 10)
-                q = index(rest, Q)
-                if (q > 0) job = substr(rest, 1, q - 1)
+EVENTS_LOG="${STAMP_DIR}/primary-events.log"
+if [[ -f "$EVENTS_LOG" ]]; then
+    ops_tsv=$(awk -v since="$since_str" '
+        BEGIN { FS = "\t" }
+        $1 >= since {
+            ts = $1; op = $2; path = $3
+            cnt[path]++
+            if (!(path in lts) || ts > lts[path]) {
+                lts[path] = ts
+                lop[path] = op
             }
-            next
         }
-        /\[OK   \] Sync job /  { job = ""; next }
-        /\[ERROR\] Sync job /  { job = ""; next }
-        job != "" && index($0, "[INFO ]   synced:  ") {
-            n = index($0, "  synced:  ")
-            if (n > 0) printf "%s\t%s\tsynced\t%s\n", ts, job, substr($0, n + 11)
+        END {
+            for (path in lts) {
+                n = split(path, parts, "/")
+                share = (n >= 4) ? parts[4] : "(root)"
+                rel = ""
+                for (i = 5; i <= n; i++) {
+                    if (parts[i] != "") rel = rel (rel != "" ? "/" : "") parts[i]
+                }
+                if (rel == "") rel = parts[n]
+                printf "%s\t%s\t%s\t%s\t%d\n", \
+                    lts[path], share, lop[path], rel, cnt[path]
+            }
         }
-        job != "" && index($0, "[INFO ]   trashed: ") {
-            n = index($0, "  trashed: ")
-            if (n > 0) printf "%s\t%s\ttrashed\t%s\n", ts, job, substr($0, n + 11)
-        }
-    ' "$LOG_FILE" 2>/dev/null | sort -t$'\t' -k2,2 -k1,1 || true)
+    ' "$EVENTS_LOG" 2>/dev/null | sort -t$'\t' -k2,2 -k1,1r || true)
 fi
 
 total_ops=0
 [[ -n "$ops_tsv" ]] && total_ops=$(echo "$ops_tsv" | grep -c . || true)
 
-# Format file operations per job, capped at 30 lines each
+# Format file changes per share, capped at 30 lines each
 ops_section=""
 if [[ $total_ops -gt 0 ]]; then
-    current_job=""
-    declare -i job_total=0 job_shown=0
-    while IFS=$'\t' read -r ts job op fname; do
-        if [[ "$job" != "$current_job" ]]; then
-            if [[ -n "$current_job" && $job_total -gt $job_shown ]]; then
-                ops_section+="      ... and $((job_total - job_shown)) more\n"
+    current_share=""
+    declare -i share_total=0 share_shown=0
+    while IFS=$'\t' read -r ts share op fname count; do
+        if [[ "$share" != "$current_share" ]]; then
+            if [[ -n "$current_share" && $share_total -gt $share_shown ]]; then
+                ops_section+="      ... and $((share_total - share_shown)) more\n"
             fi
-            current_job="$job"
-            job_total=0
-            job_shown=0
-            ops_section+="\n  ${job}\n"
+            current_share="$share"
+            share_total=0
+            share_shown=0
+            ops_section+="\n  ${share}\n"
         fi
-        (( job_total++ )) || true
-        if [[ $job_shown -lt 30 ]]; then
-            ops_section+="    ${ts:0:16}  ${op}   ${fname}\n"
-            (( job_shown++ )) || true
+        (( share_total++ )) || true
+        if [[ $share_shown -lt 30 ]]; then
+            count_str=""
+            [[ "$count" -gt 1 ]] && count_str=" (×${count})"
+            ops_section+="    ${ts:0:16}  ${op}${count_str}   ${fname}\n"
+            (( share_shown++ )) || true
         fi
     done <<< "$ops_tsv"
-    if [[ -n "$current_job" && $job_total -gt $job_shown ]]; then
-        ops_section+="      ... and $((job_total - job_shown)) more\n"
+    if [[ -n "$current_share" && $share_total -gt $share_shown ]]; then
+        ops_section+="      ... and $((share_total - share_shown)) more\n"
     fi
 fi
 
@@ -186,12 +192,12 @@ else
     body+="  Errors in period (${error_count}):\n${error_lines}"
 fi
 body+="\n"
-body+="\n=== FILE OPERATIONS ===\n"
+body+="\n=== FILE CHANGES (primary drive) ===\n"
 body+="\n"
 if [[ $total_ops -eq 0 ]]; then
     body+="  No file changes in this period.\n"
 else
-    body+="  ${total_ops} operation(s) since ${since_disp}.\n"
+    body+="  ${total_ops} file(s) changed since ${since_disp}.\n"
     body+="${ops_section}\n"
 fi
 body+="\n"
@@ -207,7 +213,7 @@ if [[ $n_anomalies -gt 0 ]]; then
 fi
 
 # ── Send ──────────────────────────────────────────────────────────────────────
-log_info "Sending status report (anomalies: ${n_anomalies}, ops: ${total_ops})..."
+log_info "Sending status report (anomalies: ${n_anomalies}, changes: ${total_ops})..."
 "${REPO_ROOT}/modules/sync/notify.sh" "$subject" "$(printf '%b' "$body")"
 
 # Update stamp
