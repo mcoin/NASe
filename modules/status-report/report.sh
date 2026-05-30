@@ -132,32 +132,19 @@ fi
 total_ops=0
 [[ -n "$ops_tsv" ]] && total_ops=$(echo "$ops_tsv" | grep -c . || true)
 
-# Format file changes per share, capped at 30 lines each
+# Format file changes per share
 ops_section=""
 if [[ $total_ops -gt 0 ]]; then
     current_share=""
-    declare -i share_total=0 share_shown=0
     while IFS=$'\t' read -r ts share op fname count; do
         if [[ "$share" != "$current_share" ]]; then
-            if [[ -n "$current_share" && $share_total -gt $share_shown ]]; then
-                ops_section+="      ... and $((share_total - share_shown)) more\n"
-            fi
             current_share="$share"
-            share_total=0
-            share_shown=0
             ops_section+="\n  ${share}\n"
         fi
-        (( share_total++ )) || true
-        if [[ $share_shown -lt 30 ]]; then
-            count_str=""
-            [[ "$count" -gt 1 ]] && count_str=" (×${count})"
-            ops_section+="    ${ts:0:16}  ${op}${count_str}   ${fname}\n"
-            (( share_shown++ )) || true
-        fi
+        count_str=""
+        [[ "$count" -gt 1 ]] && count_str=" (×${count})"
+        ops_section+="    ${ts:0:16}  ${op}${count_str}   ${fname}\n"
     done <<< "$ops_tsv"
-    if [[ -n "$current_share" && $share_total -gt $share_shown ]]; then
-        ops_section+="      ... and $((share_total - share_shown)) more\n"
-    fi
 fi
 
 # ── Compose report body ───────────────────────────────────────────────────────
