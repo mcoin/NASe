@@ -1,0 +1,65 @@
+<div id="changes-card" class="card"
+     hx-get="/partials/changes?window={{ changes.window }}&page={{ changes.page }}&group={{ 1 if changes.group else 0 }}"
+     hx-trigger="every 60s"
+     hx-swap="outerHTML">
+
+  <div class="card-head">
+    <span>File Changes — Primary Drive</span>
+    <div class="changes-controls">
+      {% for w, lbl in [("hour","1h"),("day","24h"),("week","7d"),("month","30d")] %}
+      <button class="win-btn{% if changes.window == w %} win-btn-active{% endif %}"
+              hx-get="/partials/changes?window={{ w }}&page=1&group={{ 1 if changes.group else 0 }}"
+              hx-target="#changes-card"
+              hx-swap="outerHTML">{{ lbl }}</button>
+      {% endfor %}
+      <span class="changes-sep">|</span>
+      <button class="win-btn{% if changes.group %} win-btn-active{% endif %}"
+              hx-get="/partials/changes?window={{ changes.window }}&page=1&group={{ 0 if changes.group else 1 }}"
+              hx-target="#changes-card"
+              hx-swap="outerHTML">By share</button>
+    </div>
+  </div>
+
+  {% if changes.total == 0 %}
+  <div class="changes-empty">No file changes in the last {{ changes.label }}.</div>
+  {% else %}
+
+  <div class="changes-rows">
+    {% for row in changes.rows %}
+    {% if row.type == "header" %}
+    <div class="changes-group">{{ row.share }}/</div>
+    {% else %}
+    <div class="change-row">
+      <span class="change-ts">{{ row.ts[:16] }}</span>
+      <span class="badge change-op-{{ row.op }}">{{ row.op }}</span>
+      <span class="change-path">{{ row.rel if changes.group else (row.share ~ "/" ~ row.rel) }}</span>
+      {% if row.count > 1 %}<span class="change-count">×{{ row.count }}</span>{% endif %}
+    </div>
+    {% endif %}
+    {% endfor %}
+  </div>
+
+  <div class="changes-footer">
+    <span class="changes-total">{{ changes.total }} file{{ "" if changes.total == 1 else "s" }} · since {{ changes.since[:16] }}</span>
+    {% if changes.pages > 1 %}
+    <div class="changes-pagination">
+      <button class="pg-btn"
+              {% if changes.page > 1 %}
+              hx-get="/partials/changes?window={{ changes.window }}&page={{ changes.page - 1 }}&group={{ 1 if changes.group else 0 }}"
+              hx-target="#changes-card"
+              hx-swap="outerHTML"
+              {% else %}disabled{% endif %}>&#8592;</button>
+      <span class="pg-info">{{ changes.page }}&thinsp;/&thinsp;{{ changes.pages }}</span>
+      <button class="pg-btn"
+              {% if changes.page < changes.pages %}
+              hx-get="/partials/changes?window={{ changes.window }}&page={{ changes.page + 1 }}&group={{ 1 if changes.group else 0 }}"
+              hx-target="#changes-card"
+              hx-swap="outerHTML"
+              {% else %}disabled{% endif %}>&#8594;</button>
+    </div>
+    {% endif %}
+  </div>
+
+  {% endif %}
+
+</div>

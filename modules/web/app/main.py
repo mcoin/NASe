@@ -24,6 +24,11 @@ CONFIG_FILE = REPO_ROOT / "config.yaml"
 STAMP_DIR   = Path("/var/lib/nase")
 LOG_DIR     = Path("/var/log/nase")
 CENTRAL_LOG = LOG_DIR / "nase.log"
+EVENTS_LOG  = Path(os.environ.get("NASE_EVENTS_LOG", str(STAMP_DIR / "primary-events.log")))
+
+_CHANGES_PAGE_SIZE = 20
+_WINDOW_SECS  = {"hour": 3600, "day": 86400, "week": 604800, "month": 2592000}
+_WINDOW_LABEL = {"hour": "1 hour", "day": "24 hours", "week": "7 days", "month": "30 days"}
 
 # ── Auth ───────────────────────────────────────────────────────────────────────
 _WEB_USERNAME = os.environ.get("WEB_USERNAME", "nase")
@@ -177,8 +182,11 @@ def read_log(job: str | None, lines: int = 80) -> list[dict]:
     path = log_path(job)
     if not path.exists():
         return []
-    with open(path) as f:
-        raw = f.readlines()[-lines:]
+    try:
+        with open(path) as f:
+            raw = f.readlines()[-lines:]
+    except (PermissionError, OSError):
+        return []
     result = []
     for line in raw:
         text = line.rstrip("\n")
@@ -189,6 +197,79 @@ def read_log(job: str | None, lines: int = 80) -> list[dict]:
         else:                   cls = "log-info"
         result.append({"text": text, "cls": cls})
     return result
+
+# ── File changes ───────────────────────────────────────────────────────────
+def build_changes(window: str = "day", page: int = 1, group: bool = False) -> dict:
+    secs = _WINDOW_SECS.get(window, 86400)
+    since_str = datetime.fromtimestamp(datetime.now().timestamp() - secs).strftime("%Y-%m-%d %H:%M:%S")
+
+    latest_ts: dict[str, str] = {}
+    latest_op: dict[str, str] = {}
+    counts:    dict[str, int] = {}
+
+    try:
+        log_lines_iter = open(EVENTS_LOG).readlines() if EVENTS_LOG.exists() else []
+    except (PermissionError, OSError):
+        log_lines_iter = []
+    for line in log_lines_iter:
+        parts = line.rstrip("\n").split("\t", 2)
+        if len(parts) < 3:
+            continue
+        ts, op, path = parts
+        if ts < since_str:
+            continue
+        counts[path] = counts.get(path, 0) + 1
+        if path not in latest_ts or ts > latest_ts[path]:
+            latest_ts[path] = ts
+            latest_op[path] = op
+
+    items = []
+    for path, ts in latest_ts.items():
+        parts = path.split("/")
+        # path: /mnt/primary/<share>/...  →  parts = ['', 'mnt', 'primary', share, ...]
+        if len(parts) > 3 and parts[1] == "mnt":
+            share = parts[3] if len(parts) > 3 else "(root)"
+            rel   = "/".join(p for p in parts[4:] if p) or parts[-1]
+        else:
+            share = "(root)"
+            rel   = parts[-1] if parts else path
+        items.append({"ts": ts, "share": share, "rel": rel,
+                      "op": latest_op[path], "count": counts[path]})
+
+    # Sort: (share ASC, ts DESC) when grouped; ts DESC otherwise.
+    # Two-pass stable sort achieves (primary ASC, secondary DESC).
+    if group:
+        items.sort(key=lambda x: x["ts"], reverse=True)
+        items.sort(key=lambda x: x["share"])
+    else:
+        items.sort(key=lambda x: x["ts"], reverse=True)
+
+    total  = len(items)
+    pages  = max(1, -(-total // _CHANGES_PAGE_SIZE))
+    page   = max(1, min(page, pages))
+    sliced = items[(page - 1) * _CHANGES_PAGE_SIZE : page * _CHANGES_PAGE_SIZE]
+
+    rows: list[dict] = []
+    if group:
+        cur_share: str | None = None
+        for item in sliced:
+            if item["share"] != cur_share:
+                cur_share = item["share"]
+                rows.append({"type": "header", "share": cur_share})
+            rows.append({"type": "item", **item})
+    else:
+        rows = [{"type": "item", **item} for item in sliced]
+
+    return {
+        "rows":   rows,
+        "total":  total,
+        "page":   page,
+        "pages":  pages,
+        "window": window,
+        "label":  _WINDOW_LABEL.get(window, "24 hours"),
+        "group":  group,
+        "since":  since_str,
+    }
 
 # ── Config sections ────────────────────────────────────────────────────────────
 # Order and display labels for the config editor tabs.
@@ -249,6 +330,35 @@ async def index(request: Request):
         "status":    build_status(cfg),
         "job_names": job_names,
         "log_lines": read_log(None),
+    })
+
+@app.get("/changes", response_class=HTMLResponse)
+async def changes_page(
+    request: Request,
+    window:  str  = Query("day"),
+    page:    int  = Query(1),
+    group:   bool = Query(False),
+):
+    cfg = load_config()
+    if window not in _WINDOW_SECS:
+        window = "day"
+    return templates.TemplateResponse(request, "changes.html", {
+        "hostname": cfg.get("nas", {}).get("hostname", "nase"),
+        "page":     "changes",
+        "changes":  build_changes(window, page, group),
+    })
+
+@app.get("/partials/changes", response_class=HTMLResponse)
+async def partial_changes(
+    request: Request,
+    window:  str  = Query("day"),
+    page:    int  = Query(1),
+    group:   bool = Query(False),
+):
+    if window not in _WINDOW_SECS:
+        window = "day"
+    return templates.TemplateResponse(request, "partials/changes.html", {
+        "changes": build_changes(window, page, group),
     })
 
 @app.get("/partials/status", response_class=HTMLResponse)
