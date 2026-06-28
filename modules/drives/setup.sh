@@ -78,6 +78,13 @@ for i in $(seq 0 $((n - 1))); do
     # Set ownership of the mountpoint itself (non-recursive, instant).
     # To fix ownership of all existing files run: sudo ./fix-ownership.sh
     if [[ -n "$owner" ]] && [[ -d "$mountpoint" ]]; then
+        # The owner is usually also a Samba user created by modules/samba, which
+        # runs after this module — create it here too so a from-scratch install
+        # (no pre-existing system user) doesn't fail before samba ever runs.
+        if ! id "$owner" &>/dev/null; then
+            log_info "  Creating system user '${owner}' (drive owner)"
+            useradd --system --no-create-home --shell /usr/sbin/nologin "$owner"
+        fi
         log_info "  Setting owner of ${mountpoint} to '${owner}'"
         chown "${owner}:${owner}" "$mountpoint"
     fi

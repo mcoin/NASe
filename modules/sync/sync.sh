@@ -143,17 +143,18 @@ for _k in $(seq 0 $((_n_drives - 1))); do
     fi
 done
 
+# Install the remount-ro trap before attempting the remount so that if the
+# mount command itself fails (e.g. I/O error writing the superblock), the trap
+# still fires on exit and restores the drive to read-only.
+if [[ "$dest_should_be_ro" == "true" ]]; then
+    trap 'log_info "Remounting ${dest_mount} read-only..."; mount -o remount,ro "${dest_mount}"' EXIT
+fi
+
 if [[ "$dest_is_ro" == "true" ]]; then
     log_info "Remounting ${dest_mount} read-write for sync..."
     mount -o remount,rw "$dest_mount"
 elif [[ "$dest_should_be_ro" == "true" ]]; then
     log_warn "${dest_mount} is mounted rw but is configured read_only — will remount ro after sync."
-fi
-
-# Install the remount-ro trap whenever the drive should end up ro,
-# regardless of whether we were the ones to flip it rw.
-if [[ "$dest_should_be_ro" == "true" ]]; then
-    trap 'log_info "Remounting ${dest_mount} read-only..."; mount -o remount,ro "${dest_mount}"' EXIT
 fi
 
 mkdir -p "$dest_path"
