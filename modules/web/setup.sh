@@ -81,7 +81,7 @@ if [[ ! -f "$hash_stamp" ]] || [[ "$(cat "$hash_stamp")" != "$app_hash" ]]; then
 fi
 
 systemctl enable --now nase-web.service
-if $need_restart; then
+if [[ "$need_restart" == "true" ]]; then
     systemctl restart nase-web.service
     log_ok "NASe web dashboard restarted on port ${port}."
 else
