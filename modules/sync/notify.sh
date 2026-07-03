@@ -30,7 +30,7 @@ case "$METHOD" in
 
         # Use msmtp if available; otherwise use mailutils mail command
         if command -v msmtp &>/dev/null; then
-            cat > /tmp/nase-msmtprc.$$ <<EOF
+            (umask 077; cat > /tmp/nase-msmtprc.$$ <<EOF
 defaults
 tls on
 tls_starttls on
@@ -46,6 +46,7 @@ logfile /var/log/msmtp.log
 
 account default : nase
 EOF
+)
             trap 'rm -f /tmp/nase-msmtprc.$$' EXIT
             printf 'To: %s\nFrom: %s\nSubject: %s\n\n%s\n' \
                 "$RECIPIENT" "$SMTP_FROM" "$SUBJECT" "$BODY" \
