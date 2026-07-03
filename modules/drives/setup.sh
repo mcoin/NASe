@@ -64,6 +64,9 @@ for i in $(seq 0 $((n - 1))); do
             # Regular unmount failed (busy processes holding open handles).
             # Lazy unmount detaches from the hierarchy immediately; the kernel
             # completes the release once all open file handles are closed.
+            # Warning: in-progress writes at the time of lazy unmount have
+            # undefined behaviour — flag this explicitly so it is not silent.
+            log_warn "  ${current_mp} is busy — using lazy unmount. Any in-progress writes may not complete safely."
             umount -l "$current_mp" 2>/dev/null \
                 || log_warn "  Could not unmount ${current_mp} — may need manual cleanup"
         fi
