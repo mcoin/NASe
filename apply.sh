@@ -74,7 +74,7 @@ log_section "Systemd units"
 for unit_src in "${REPO_ROOT}/systemd/"*; do
     unit_name=$(basename "$unit_src")
     unit_dest="/etc/systemd/system/${unit_name}"
-    rendered=$(sed "s|__REPO_ROOT__|${REPO_ROOT}|g" "$unit_src")
+    rendered=$(sed "s#__REPO_ROOT__#${REPO_ROOT}#g" "$unit_src")
     if [[ ! -f "$unit_dest" ]] || ! diff -q <(echo "$rendered") "$unit_dest" &>/dev/null; then
         log_info "Installing unit: ${unit_name}"
         echo "$rendered" > "$unit_dest"
