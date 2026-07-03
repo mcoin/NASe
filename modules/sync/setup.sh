@@ -148,9 +148,11 @@ for i in $(seq 0 $((n - 1))); do
 
     if [[ "$is_ro" == "true" ]]; then
         log_info "  Trash dir '${trash_path}': remounting ${trash_mount} rw to create directory..."
-        mount -o remount,rw "$trash_mount"
+        mount -o remount,rw "$trash_mount" \
+            || { log_error "  Cannot remount ${trash_mount} rw — skipping trash dir creation."; continue; }
         mkdir -p "$trash_path"
-        mount -o remount,ro "$trash_mount"
+        mount -o remount,ro "$trash_mount" \
+            || log_warn "  Failed to remount ${trash_mount} ro — drive left writable."
     else
         mkdir -p "$trash_path"
     fi
