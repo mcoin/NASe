@@ -89,15 +89,19 @@ def drive_info(drive: dict) -> dict:
     r = _run("findmnt", "--target", mp, "--noheadings")
     if r.returncode != 0 or not r.stdout.strip():
         return {"status": "not mounted", "mode": None, "usage": None}
-    opts = _run("findmnt", "--target", mp,
-                "--output", "OPTIONS", "--noheadings", "--first-only").stdout
-    mode = "ro" if "ro" in opts.split(",") else "rw"
-    df = _run("df", "-h", mp).stdout.splitlines()
+    r_opts = _run("findmnt", "--target", mp,
+                  "--output", "OPTIONS", "--noheadings", "--first-only")
+    if r_opts.returncode != 0:
+        return {"status": "not mounted", "mode": None, "usage": None}
+    mode = "ro" if "ro" in r_opts.stdout.split(",") else "rw"
+    r_df = _run("df", "-h", mp)
     usage = None
-    if len(df) >= 2:
-        parts = df[1].split()
-        if len(parts) >= 5:
-            usage = f"{parts[2]} / {parts[1]} ({parts[4]})"
+    if r_df.returncode == 0:
+        df = r_df.stdout.splitlines()
+        if len(df) >= 2:
+            parts = df[1].split()
+            if len(parts) >= 5:
+                usage = f"{parts[2]} / {parts[1]} ({parts[4]})"
     return {"status": "mounted", "mode": mode, "usage": usage}
 
 # ── Stamp info ─────────────────────────────────────────────────────────────────
