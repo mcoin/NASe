@@ -54,7 +54,10 @@ app.mount("/static", StaticFiles(directory=str(APP_DIR / "static")), name="stati
 templates = Jinja2Templates(directory=str(APP_DIR / "templates"))
 
 # Cache-bust static assets by fingerprinting at startup.
-_css_v = str(int((APP_DIR / "static" / "style.css").stat().st_mtime))
+try:
+    _css_v = str(int((APP_DIR / "static" / "style.css").stat().st_mtime))
+except FileNotFoundError:
+    _css_v = "0"
 templates.env.globals["css_v"] = _css_v
 
 # Router whose routes all require authentication (config editing + apply).
