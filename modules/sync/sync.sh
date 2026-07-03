@@ -241,7 +241,7 @@ if rsync $rsync_flags $EXTRA_FLAGS \
             && [[ -n "$trash_days" ]] && [[ "$trash_days" -gt 0 ]]; then
         log_info "Purging trash older than ${trash_days} days..."
         find "$trash_path" -mindepth 1 -maxdepth 1 -type d -mtime +"$trash_days" \
-            -exec rm -rf {} \;
+            -exec rm -rf {} + || log_warn "Failed to purge some trash in ${trash_path}"
     fi
 
     # Record successful sync time for change detection on next run
