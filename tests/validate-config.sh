@@ -134,6 +134,11 @@ for i in $(seq 0 $((n_jobs - 1))); do
         fail ".sync_jobs[$i].on_failure must be 'notify' or 'ignore' (job: ${job_name})."
     fi
 
+    rsync_flags=$(config_idx '.sync_jobs' "$i" '.rsync_flags')
+    if [[ "$rsync_flags" =~ [';|&`$><(){}'] ]]; then
+        fail ".sync_jobs[$i].rsync_flags contains shell metacharacters (job: ${job_name}). Got: '${rsync_flags}'"
+    fi
+
     # Validate OnCalendar expression if systemd-analyze is available
     if command -v systemd-analyze &>/dev/null; then
         if ! systemd-analyze calendar "$schedule" &>/dev/null; then
