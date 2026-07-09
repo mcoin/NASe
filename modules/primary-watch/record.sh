@@ -65,5 +65,9 @@ done < <(
         --event moved_from \
         --event moved_to \
         --event create \
-        "$WATCH_PATH" 2>/dev/null
-)
+        "$WATCH_PATH"
+) || {
+    status=$?
+    log_error "inotifywait exited with status ${status} — watch setup likely failed (e.g. fs.inotify.max_user_watches too low for the directory count under ${WATCH_PATH})."
+    exit "$status"
+}

@@ -62,3 +62,27 @@ if [[ ${#failures[@]} -gt 0 ]]; then
 fi
 
 log_ok "All SMART checks passed."
+
+# ── Inotify watch capacity ──────────────────────────────────────────────────
+# modules/primary-watch/record.sh needs one inotify watch per directory under
+# /mnt/primary. Warn well before the directory count catches up with
+# fs.inotify.max_user_watches, since once it's exceeded the recorder starts
+# failing silently and the web UI's Changes view goes blank.
+WATCH_ROOT="/mnt/primary"
+WATCH_WARN_PCT=80
+
+if [[ -d "$WATCH_ROOT" ]]; then
+    watch_limit=$(cat /proc/sys/fs/inotify/max_user_watches 2>/dev/null || echo 0)
+    dir_count=$(find "$WATCH_ROOT" -xdev -type d 2>/dev/null | wc -l)
+
+    if [[ "$watch_limit" -gt 0 ]]; then
+        pct=$(( dir_count * 100 / watch_limit ))
+        log_info "Primary drive directory count: ${dir_count} (${pct}% of fs.inotify.max_user_watches=${watch_limit})"
+
+        if (( pct >= WATCH_WARN_PCT )); then
+            message="Primary drive has ${dir_count} directories, ${pct}% of the fs.inotify.max_user_watches limit (${watch_limit}) on $(hostname). Once this limit is exceeded, the primary-watch file-change recorder (nase-primary-watch.service) will fail to set up its watch and the Changes view will stop updating. Raise fs.inotify.max_user_watches in modules/primary-watch/setup.sh and re-apply."
+            log_warn "$message"
+            "${REPO_ROOT}/modules/sync/notify.sh" "inotify watch capacity warning on $(hostname)" "$message" || true
+        fi
+    fi
+fi
