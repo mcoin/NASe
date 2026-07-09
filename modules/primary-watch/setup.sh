@@ -19,7 +19,7 @@ After=network.target
 Type=simple
 ExecStart=${RECORD_SCRIPT}
 Environment=REPO_ROOT=${REPO_ROOT}
-Restart=on-failure
+Restart=always
 RestartSec=30
 StandardOutput=journal
 StandardError=journal
