@@ -486,9 +486,8 @@ cmd_notify_test() {
         set -a; source "${REPO_ROOT}/.env"; set +a
     fi
     log_info "Sending test notification..."
-    "${REPO_ROOT}/modules/sync/notify.sh" \
-        "NASe test notification from $(hostname)" \
-        "This is a test message sent via 'nase notify-test' on $(date '+%Y-%m-%d %H:%M:%S')."
+    printf '%s' "This is a test message sent via 'nase notify-test' on $(date '+%Y-%m-%d %H:%M:%S')." \
+        | "${REPO_ROOT}/modules/sync/notify.sh" "NASe test notification from $(hostname)"
     log_ok "Done."
 }
 

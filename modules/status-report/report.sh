@@ -133,18 +133,10 @@ total_ops=0
 [[ -n "$ops_tsv" ]] && total_ops=$(echo "$ops_tsv" | grep -c . || true)
 
 # Format file changes per share.
-# Capped like the error list above — an email listing every one of a
-# 30k-change week is unreadable, and passing that much text as a single
-# argv string to notify.sh exceeds the kernel's argument-length limit
-# (execve fails with "Argument list too long", silently dropping the
-# entire report). Full detail remains available via ${LOG_FILE}.
-OPS_LIMIT=200
 ops_section=""
 if [[ $total_ops -gt 0 ]]; then
     current_share=""
-    ops_shown=0
     while IFS=$'\t' read -r ts share op fname count; do
-        [[ $ops_shown -ge $OPS_LIMIT ]] && continue
         if [[ "$share" != "$current_share" ]]; then
             current_share="$share"
             ops_section+="\n  ${share}\n"
@@ -152,11 +144,7 @@ if [[ $total_ops -gt 0 ]]; then
         count_str=""
         [[ "$count" -gt 1 ]] && count_str=" (×${count})"
         ops_section+="    ${ts:0:16}  ${op}${count_str}   ${fname}\n"
-        (( ops_shown++ )) || true
     done <<< "$ops_tsv"
-    if [[ $total_ops -gt $OPS_LIMIT ]]; then
-        ops_section+="\n    ... and $((total_ops - OPS_LIMIT)) more (see ${LOG_FILE} or 'nase logs')\n"
-    fi
 fi
 
 # ── Compose report body ───────────────────────────────────────────────────────
@@ -213,7 +201,7 @@ fi
 
 # ── Send ──────────────────────────────────────────────────────────────────────
 log_info "Sending status report (anomalies: ${n_anomalies}, changes: ${total_ops})..."
-"${REPO_ROOT}/modules/sync/notify.sh" "$subject" "$(printf '%b' "$body")"
+printf '%b' "$body" | "${REPO_ROOT}/modules/sync/notify.sh" "$subject"
 
 # Update stamp
 mkdir -p "$STAMP_DIR"

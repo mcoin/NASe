@@ -79,7 +79,7 @@ notify_with_cooldown() {
         fi
     fi
     echo "$now" > "$stamp"
-    "$NOTIFY" "$subject" "$body" || true
+    printf '%s' "$body" | "$NOTIFY" "$subject" || true
 }
 
 # Process substitution keeps the arrays visible (avoids a subshell via pipe).

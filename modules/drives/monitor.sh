@@ -57,7 +57,7 @@ if [[ ${#failures[@]} -gt 0 ]]; then
         message+="  - ${f}"$'\n'
     done
     log_error "$message"
-    "${REPO_ROOT}/modules/sync/notify.sh" "SMART failure on $(hostname)" "$message" || true
+    printf '%s' "$message" | "${REPO_ROOT}/modules/sync/notify.sh" "SMART failure on $(hostname)" || true
     exit 1
 fi
 
@@ -82,7 +82,7 @@ if [[ -d "$WATCH_ROOT" ]]; then
         if (( pct >= WATCH_WARN_PCT )); then
             message="Primary drive has ${dir_count} directories, ${pct}% of the fs.inotify.max_user_watches limit (${watch_limit}) on $(hostname). Once this limit is exceeded, the primary-watch file-change recorder (nase-primary-watch.service) will fail to set up its watch and the Changes view will stop updating. Raise fs.inotify.max_user_watches in modules/primary-watch/setup.sh and re-apply."
             log_warn "$message"
-            "${REPO_ROOT}/modules/sync/notify.sh" "inotify watch capacity warning on $(hostname)" "$message" || true
+            printf '%s' "$message" | "${REPO_ROOT}/modules/sync/notify.sh" "inotify watch capacity warning on $(hostname)" || true
         fi
     fi
 fi

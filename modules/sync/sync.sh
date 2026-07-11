@@ -254,8 +254,8 @@ else
         # Include last 20 lines of rsync log in notification
         tail_output=$(tail -n 20 "$RSYNC_LOG" 2>/dev/null || echo "(log unavailable)")
         full_msg="${msg}"$'\n\n'"Last log lines:"$'\n'"${tail_output}"
-        "${REPO_ROOT}/modules/sync/notify.sh" \
-            "NASe sync failed: ${JOB_NAME} on $(hostname)" "$full_msg" || true
+        printf '%s' "$full_msg" | "${REPO_ROOT}/modules/sync/notify.sh" \
+            "NASe sync failed: ${JOB_NAME} on $(hostname)" || true
     fi
     exit "$RSYNC_EXIT"
 fi

@@ -1,7 +1,14 @@
 #!/usr/bin/env bash
 # modules/sync/notify.sh
 # Send a notification (email or webhook) on sync failure or SMART alerts.
-# Usage: notify.sh "<subject>" "<body>"
+# Usage: notify.sh "<subject>"   (body read from stdin)
+#
+# Body comes from stdin rather than a second argv element because the
+# kernel caps a single argv string well below what a full report body can
+# reach (MAX_ARG_STRLEN is 128KB on Linux) — a long body passed as an
+# argument makes execve fail with "Argument list too long" before this
+# script even starts, silently dropping the notification. Stdin has no
+# such limit.
 set -euo pipefail
 
 REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
@@ -9,7 +16,8 @@ source "${REPO_ROOT}/lib/log.sh"
 source "${REPO_ROOT}/lib/config.sh"
 
 SUBJECT="${1:-NASe alert}"
-BODY="${2:-No details provided.}"
+BODY="$(cat)"
+BODY="${BODY:-No details provided.}"
 
 METHOD=$(config_get '.notifications.method')
 
@@ -65,9 +73,11 @@ EOF
             "$(echo "$SUBJECT" | sed 's/"/\\"/g')" \
             "$(echo "$BODY"    | sed 's/"/\\"/g')")
 
-        curl -s -X POST \
+        # --data-binary @- reads the payload from stdin instead of argv —
+        # same argv-size limit applies to curl as to this script itself.
+        printf '%s' "$payload" | curl -s -X POST \
             -H "Content-Type: application/json" \
-            -d "$payload" \
+            --data-binary @- \
             "$WEBHOOK_URL" \
             || log_warn "Webhook delivery failed."
         log_info "Webhook notification sent."

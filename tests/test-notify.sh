@@ -57,8 +57,8 @@ export PATH="${STUBS}:${PATH}"
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 run_notify() {
-    CONFIG_FILE="$TEST_CFG" \
-    bash "${REPO_ROOT}/modules/sync/notify.sh" "Test subject" "Test body" 2>/dev/null
+    echo "Test body" | CONFIG_FILE="$TEST_CFG" \
+        bash "${REPO_ROOT}/modules/sync/notify.sh" "Test subject" 2>/dev/null
 }
 
 reset_log() { rm -f "$STUB_LOG"; }
@@ -94,8 +94,8 @@ notifications:
 YAML
 reset_log
 assert_exit0 "method=webhook, no URL: exits 0" \
-    bash -c "CONFIG_FILE='$TEST_CFG' WEBHOOK_URL='' \
-        bash '${REPO_ROOT}/modules/sync/notify.sh' 'subj' 'body' 2>/dev/null"
+    bash -c "echo body | CONFIG_FILE='$TEST_CFG' WEBHOOK_URL='' \
+        bash '${REPO_ROOT}/modules/sync/notify.sh' 'subj' 2>/dev/null"
 assert_not_contains "method=webhook, no URL: curl not called" \
     "curl" "$(cat "$STUB_LOG" 2>/dev/null || true)"
 
@@ -105,9 +105,9 @@ notifications:
   method: webhook
 YAML
 reset_log
-CONFIG_FILE="$TEST_CFG" \
+echo body | CONFIG_FILE="$TEST_CFG" \
 WEBHOOK_URL="https://hooks.example.com/abc123" \
-    bash "${REPO_ROOT}/modules/sync/notify.sh" "subj" "body" 2>/dev/null
+    bash "${REPO_ROOT}/modules/sync/notify.sh" "subj" 2>/dev/null
 assert_contains "method=webhook, URL set: curl called with URL" \
     "https://hooks.example.com/abc123" "$(cat "$STUB_LOG")"
 assert_contains "method=webhook: POST method passed" \
@@ -120,9 +120,9 @@ notifications:
   email: admin@example.com
 YAML
 reset_log
-CONFIG_FILE="$TEST_CFG" \
+echo body | CONFIG_FILE="$TEST_CFG" \
 SMTP_HOST="" \
-    bash "${REPO_ROOT}/modules/sync/notify.sh" "subj" "body" 2>/dev/null
+    bash "${REPO_ROOT}/modules/sync/notify.sh" "subj" 2>/dev/null
 assert_contains "method=email, no SMTP_HOST: sendmail called" \
     "sendmail" "$(cat "$STUB_LOG")"
 assert_not_contains "method=email, no SMTP_HOST: msmtp not called" \
@@ -130,11 +130,11 @@ assert_not_contains "method=email, no SMTP_HOST: msmtp not called" \
 
 # 6. method=email, SMTP_HOST set, msmtp available: msmtp called
 reset_log
-CONFIG_FILE="$TEST_CFG" \
+echo body | CONFIG_FILE="$TEST_CFG" \
 SMTP_HOST="smtp.example.com" \
 SMTP_USER="user@example.com" \
 SMTP_PASSWORD="secret" \
-    bash "${REPO_ROOT}/modules/sync/notify.sh" "subj" "body" 2>/dev/null
+    bash "${REPO_ROOT}/modules/sync/notify.sh" "subj" 2>/dev/null
 assert_contains "method=email, SMTP set: msmtp called" \
     "msmtp" "$(cat "$STUB_LOG")"
 assert_contains "method=email: recipient passed to msmtp" \
