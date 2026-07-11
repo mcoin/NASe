@@ -27,6 +27,22 @@ _log_to_file() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') [${level}] $*" >> "$NAS_LOG" 2>/dev/null || true
 }
 
+# Append many lines to the log file under one timestamp/open instead of
+# forking `date` and reopening the file per line — callers logging
+# per-file results (e.g. a multi-million-file rsync) can otherwise turn a
+# few seconds of work into days of subprocess overhead. Reads entries from
+# stdin, one per line.
+_log_batch_to_file() {
+    local level="$1" prefix="$2"
+    local dir
+    dir=$(dirname "$NAS_LOG")
+    [[ -d "$dir" ]] || mkdir -p "$dir" 2>/dev/null || return 0
+    local ts
+    ts="$(date '+%Y-%m-%d %H:%M:%S')"
+    awk -v ts="$ts" -v lvl="$level" -v pfx="$prefix" \
+        'NF { print ts " [" lvl "] " pfx $0 }' >> "$NAS_LOG" 2>/dev/null || true
+}
+
 log_info()    { echo -e "${_CLR_CYAN}[INFO]${_CLR_RESET}  $*";  _log_to_file "INFO " "$*"; }
 log_ok()      { echo -e "${_CLR_GREEN}[OK]${_CLR_RESET}    $*"; _log_to_file "OK   " "$*"; }
 log_warn()    { echo -e "${_CLR_YELLOW}[WARN]${_CLR_RESET}  $*" >&2; _log_to_file "WARN " "$*"; }

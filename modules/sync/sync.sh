@@ -216,9 +216,7 @@ if rsync $rsync_flags $EXTRA_FLAGS \
     transferred_count=$(echo "$transferred" | grep -c . || true)
     if [[ "$transferred_count" -gt 0 ]]; then
         _log_to_file "INFO " "${transferred_count} file(s) transferred:"
-        while IFS= read -r f; do
-            [[ -n "$f" ]] && _log_to_file "INFO " "  synced:  ${f}"
-        done <<< "$transferred"
+        printf '%s\n' "$transferred" | _log_batch_to_file "INFO " "  synced:  "
     fi
 
     # Log files moved to trash this run
@@ -228,9 +226,7 @@ if rsync $rsync_flags $EXTRA_FLAGS \
             log_info "Trash: ${trash_count} file(s) moved to ${TRASH_RUN_DIR}"
             _log_to_file "INFO " "${trash_count} file(s) moved to trash:"
             find "$TRASH_RUN_DIR" -type f -printf '%P\n' 2>/dev/null | sort \
-                | while IFS= read -r f; do
-                    _log_to_file "INFO " "  trashed: ${f}"
-                done
+                | _log_batch_to_file "INFO " "  trashed: "
         fi
     fi
 
