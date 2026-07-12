@@ -1,0 +1,118 @@
+<div id="integrity-wrap"
+     hx-get="/partials/integrity"
+     hx-trigger="every 60s"
+     hx-swap="innerHTML">
+
+{% if not integrity.enabled %}
+  <div class="card">
+    <div class="card-head">Checksum Integrity</div>
+    <div class="changes-empty">
+      Disabled — set <code>integrity.enabled: true</code> in Config, then run
+      <code>sudo nase apply integrity</code>.
+    </div>
+  </div>
+{% elif integrity.drives|length == 0 %}
+  <div class="card">
+    <div class="card-head">Checksum Integrity</div>
+    <div class="changes-empty">No active drives configured.</div>
+  </div>
+{% else %}
+  {% for d in integrity.drives %}
+  <div class="card integrity-card">
+    <div class="card-head">
+      <span class="integrity-title">
+        <span>{{ d.name }}</span>
+        <span class="muted mono">{{ d.mountpoint }}</span>
+      </span>
+      {% if not d.has_manifest %}
+        <span class="badge badge-warn">no manifest</span>
+      {% elif d.discovery_complete %}
+        <span class="badge badge-ok">discovery complete</span>
+      {% else %}
+        <span class="badge badge-warn">discovery in progress</span>
+      {% endif %}
+    </div>
+
+    {% if not d.has_manifest %}
+    <div class="changes-empty">
+      No manifest yet — run <code>sudo nase apply integrity</code>, then
+      <code>sudo nase integrity bootstrap {{ d.name }}</code> for immediate full coverage,
+      or leave it to build up progressively overnight.
+    </div>
+    {% else %}
+
+    <div class="integrity-stats">
+      <div class="integrity-stat">
+        <span class="integrity-stat-value">{{ d.total }}</span>
+        <span class="integrity-stat-label">files tracked</span>
+      </div>
+      <div class="integrity-stat">
+        <span class="integrity-stat-value">{{ d.ok }}</span>
+        <span class="integrity-stat-label">ok</span>
+      </div>
+      <div class="integrity-stat">
+        <span class="integrity-stat-value{% if d.flagged > 0 %} integrity-stat-bad{% endif %}">{{ d.flagged }}</span>
+        <span class="integrity-stat-label">flagged</span>
+      </div>
+    </div>
+
+    {% if not d.discovery_complete %}
+    <div class="integrity-discovery">
+      {% if d.discovery_pct is not none %}
+      <div class="progress-track"><div class="progress-fill" style="width: {{ d.discovery_pct }}%;"></div></div>
+      <span class="muted">{{ d.discovery_pct }}% of drive discovered so far</span>
+      {% else %}
+      <span class="muted">Discovery has not completed a pass yet.</span>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    {% if d.flagged_rows|length == 0 %}
+    <div class="changes-empty">No flagged files — all checks passing.</div>
+    {% else %}
+    <table>
+      <thead>
+        <tr>
+          <th>Path</th>
+          <th>Issue</th>
+          <th>Detail</th>
+          <th>Flagged</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in d.flagged_rows %}
+        <tr>
+          <td class="mono">{{ row.path }}</td>
+          <td>
+            {% if row.event_type == "missing" %}
+              <span class="badge badge-warn">missing</span>
+            {% else %}
+              <span class="badge badge-err">{{ row.event_type }}</span>
+            {% endif %}
+          </td>
+          <td class="muted">{{ row.detail or "—" }}</td>
+          <td class="muted">{{ row.checked }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% if d.flagged_truncated %}
+    <div class="changes-footer">
+      <span class="changes-total">Showing the {{ d.flagged_rows|length }} most recently flagged of {{ d.flagged }}.</span>
+    </div>
+    {% endif %}
+    {% endif %}
+
+    <div class="integrity-footer">
+      <span class="muted">
+        Review with <code>sudo nase integrity status {{ d.name }}</code>,
+        clear with <code>sudo nase integrity ack {{ d.name }} &lt;path&gt;</code>.
+      </span>
+    </div>
+
+    {% endif %}
+  </div>
+  {% endfor %}
+{% endif %}
+
+</div>

@@ -6,7 +6,9 @@ Or via the shell wrapper:
     bash tests/web/run.sh
 """
 import base64
+import sqlite3
 import sys
+import time
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -16,6 +18,32 @@ import pytest
 REPO_ROOT = Path(__file__).parent.parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+
+INTEGRITY_SCHEMA = REPO_ROOT / "modules" / "integrity" / "schema.sql"
+
+
+def make_integrity_db(db_path: Path, *, rows=(), events=(), meta=None):
+    """Build a real .nase/integrity.db (using the actual production schema)
+    for tests to point drive_integrity_info()/build_integrity() at."""
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(db_path)
+    conn.executescript(INTEGRITY_SCHEMA.read_text())
+    now = int(time.time())
+    for path, size, mtime, checksum, status, last_checked in rows:
+        conn.execute(
+            "INSERT INTO files (path, size, mtime, checksum, status, first_seen, last_updated, last_checked) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (path, size, mtime, checksum, status, now, now, last_checked),
+        )
+    for path, event_type, detail in events:
+        conn.execute(
+            "INSERT INTO events (ts, path, event_type, detail) VALUES (?, ?, ?, ?)",
+            (now, path, event_type, detail),
+        )
+    for key, value in (meta or {}).items():
+        conn.execute("INSERT INTO meta (key, value) VALUES (?, ?)", (key, value))
+    conn.commit()
+    conn.close()
 
 MINIMAL_CONFIG = """\
 nas:
@@ -104,5 +132,58 @@ def client(config_file, stamp_dir, log_dir, monkeypatch):
         return r
 
     monkeypatch.setattr(m, "_run", fake_run)
+    return TestClient(m.app, raise_server_exceptions=True)
+
+
+@pytest.fixture()
+def integrity_config_file(tmp_path):
+    """A config with integrity enabled and one active drive with a real
+    (writable, test-owned) mountpoint — MINIMAL_CONFIG's drive is inactive
+    and has no real mountpoint, so integrity tests need their own config."""
+    drive_mp = tmp_path / "drive1"
+    drive_mp.mkdir()
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(f"""\
+nas:
+  hostname: test-nas
+drives:
+  - name: drive1
+    uuid: 00000000-0000-0000-0000-000000000001
+    mountpoint: {drive_mp}
+    active: true
+samba:
+  workgroup: WORKGROUP
+  shares: []
+sync_jobs: []
+services:
+  filebrowser:
+    enabled: false
+  web:
+    enabled: true
+    port: 8088
+tailscale:
+  enabled: false
+notifications:
+  method: none
+file_watch: []
+integrity:
+  enabled: true
+""")
+    return cfg
+
+
+@pytest.fixture()
+def integrity_client(integrity_config_file, stamp_dir, log_dir, monkeypatch):
+    """TestClient pointed at integrity_config_file (integrity enabled, one
+    active drive with a real mountpoint under tmp_path)."""
+    import modules.web.app.main as m
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setattr(m, "CONFIG_FILE", integrity_config_file)
+    monkeypatch.setattr(m, "STAMP_DIR", stamp_dir)
+    monkeypatch.setattr(m, "LOG_DIR", log_dir)
+    monkeypatch.setattr(m, "CENTRAL_LOG", log_dir / "nase.log")
+    monkeypatch.setattr(m, "_WEB_USERNAME", TEST_USER)
+    monkeypatch.setattr(m, "_WEB_PASSWORD", TEST_PASS)
 
     return TestClient(m.app, raise_server_exceptions=True)

@@ -631,3 +631,89 @@ td.mono  { font-family: monospace; font-size: 0.8rem; color: var(--muted); }
   color: var(--muted);
   text-align: center;
 }
+
+/* ── Integrity page ──────────────────────────────────────────────────────── */
+#integrity-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.integrity-title {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  text-transform: none;
+  letter-spacing: normal;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.integrity-title .mono { font-size: 0.72rem; font-weight: 400; }
+
+.integrity-stats {
+  display: flex;
+  gap: 1.75rem;
+  padding: 0.9rem 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.integrity-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.integrity-stat-value {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.integrity-stat-value.integrity-stat-bad { color: var(--err); }
+
+.integrity-stat-label {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+.integrity-discovery {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.78rem;
+}
+
+.progress-track {
+  flex: 1;
+  max-width: 220px;
+  background: var(--border);
+  border-radius: 9999px;
+  height: 6px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  background: #2563eb;
+  height: 100%;
+  border-radius: 9999px;
+  transition: width 0.3s;
+}
+
+.integrity-footer {
+  padding: 0.6rem 1rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.72rem;
+}
+
+.integrity-footer code, .changes-empty code {
+  font-family: monospace;
+  background: rgba(0,0,0,0.06);
+  padding: 0.1em 0.35em;
+  border-radius: 3px;
+}

@@ -1,9 +1,12 @@
 """Tests for modules/web/app/main.py."""
 import base64
+import time
 from unittest.mock import patch
 
 import pytest
 import yaml
+
+from conftest import make_integrity_db
 
 
 # ── read_log ───────────────────────────────────────────────────────────────────
@@ -300,3 +303,177 @@ def test_apply_all_streams_sse(client, auth_headers):
     assert r.status_code == 200
     assert "text/event-stream" in r.headers["content-type"]
     assert "event: done" in r.text
+
+
+# ── drive_integrity_info / build_integrity ──────────────────────────────────────
+
+def test_drive_integrity_info_no_manifest(tmp_path):
+    import modules.web.app.main as m
+    info = m.drive_integrity_info("drive1", str(tmp_path / "nope"))
+    assert info == {"name": "drive1", "mountpoint": str(tmp_path / "nope"), "has_manifest": False}
+
+
+def test_drive_integrity_info_empty_mountpoint():
+    import modules.web.app.main as m
+    info = m.drive_integrity_info("drive1", "")
+    assert info["has_manifest"] is False
+
+
+def test_drive_integrity_info_counts_and_discovery(tmp_path):
+    import modules.web.app.main as m
+    db = tmp_path / "drive1" / ".nase" / "integrity.db"
+    now = int(time.time())
+    make_integrity_db(
+        db,
+        rows=[
+            ("a.txt", 10, now, "aaa", "ok", now),
+            ("b.txt", 10, now, "bbb", "ok", now),
+            ("c.txt", 10, now, "ccc", "flagged", now),
+        ],
+        meta={"discovery_complete": "false", "discovery_total": "6", "drive_uuid": "x"},
+    )
+    info = m.drive_integrity_info("drive1", str(tmp_path / "drive1"))
+    assert info["has_manifest"] is True
+    assert info["total"] == 3
+    assert info["ok"] == 2
+    assert info["flagged"] == 1
+    assert info["discovery_complete"] is False
+    # 3 known files out of a 6-file discovery_total → 50%
+    assert info["discovery_pct"] == 50
+
+
+def test_drive_integrity_info_discovery_complete_has_no_pct(tmp_path):
+    import modules.web.app.main as m
+    db = tmp_path / "drive1" / ".nase" / "integrity.db"
+    make_integrity_db(db, meta={"discovery_complete": "true"})
+    info = m.drive_integrity_info("drive1", str(tmp_path / "drive1"))
+    assert info["discovery_complete"] is True
+    assert info["discovery_pct"] is None
+
+
+def test_drive_integrity_info_flagged_rows_include_event_detail(tmp_path):
+    import modules.web.app.main as m
+    db = tmp_path / "drive1" / ".nase" / "integrity.db"
+    now = int(time.time())
+    make_integrity_db(
+        db,
+        rows=[("bad.txt", 10, now, "aaa", "flagged", now)],
+        events=[("bad.txt", "mismatch", "expected aaa got zzz")],
+        meta={"discovery_complete": "true"},
+    )
+    info = m.drive_integrity_info("drive1", str(tmp_path / "drive1"))
+    assert len(info["flagged_rows"]) == 1
+    row = info["flagged_rows"][0]
+    assert row["path"] == "bad.txt"
+    assert row["event_type"] == "mismatch"
+    assert "expected aaa got zzz" in row["detail"]
+
+
+def test_drive_integrity_info_flagged_rows_only_ok_excluded(tmp_path):
+    import modules.web.app.main as m
+    db = tmp_path / "drive1" / ".nase" / "integrity.db"
+    now = int(time.time())
+    make_integrity_db(
+        db,
+        rows=[("good.txt", 10, now, "aaa", "ok", now)],
+        meta={"discovery_complete": "true"},
+    )
+    info = m.drive_integrity_info("drive1", str(tmp_path / "drive1"))
+    assert info["flagged_rows"] == []
+
+
+def test_build_integrity_disabled_by_default():
+    import modules.web.app.main as m
+    assert m.build_integrity({}) == {"enabled": False, "drives": []}
+
+
+def test_build_integrity_excludes_inactive_drives(tmp_path):
+    import modules.web.app.main as m
+    cfg = {
+        "integrity": {"enabled": True},
+        "drives": [
+            {"name": "a", "mountpoint": str(tmp_path / "a"), "active": True},
+            {"name": "b", "mountpoint": str(tmp_path / "b"), "active": False},
+        ],
+    }
+    result = m.build_integrity(cfg)
+    assert result["enabled"] is True
+    assert [d["name"] for d in result["drives"]] == ["a"]
+
+
+# ── Route: GET /integrity ───────────────────────────────────────────────────────
+
+def test_integrity_page_returns_200(integrity_client):
+    r = integrity_client.get("/integrity")
+    assert r.status_code == 200
+    assert "text/html" in r.headers["content-type"]
+
+
+def test_integrity_page_no_auth_required(integrity_client):
+    # Unlike /config, integrity status is read-only and unauthenticated,
+    # matching / and /changes.
+    r = integrity_client.get("/integrity")
+    assert r.status_code == 200
+
+
+def test_integrity_page_shows_drive_name(integrity_client):
+    r = integrity_client.get("/integrity")
+    assert "drive1" in r.text
+
+
+def test_integrity_page_no_manifest_shows_hint(integrity_client):
+    r = integrity_client.get("/integrity")
+    assert "no manifest" in r.text.lower()
+    assert "nase apply integrity" in r.text
+
+
+def test_integrity_page_disabled_shows_hint(client):
+    # The shared `client` fixture's MINIMAL_CONFIG has no integrity section.
+    r = client.get("/integrity")
+    assert r.status_code == 200
+    assert "integrity.enabled" in r.text
+
+
+def test_integrity_page_shows_flagged_file(integrity_client, integrity_config_file):
+    import modules.web.app.main as m
+    cfg = yaml.safe_load(integrity_config_file.read_text())
+    mountpoint = cfg["drives"][0]["mountpoint"]
+    now = int(time.time())
+    make_integrity_db(
+        m._integrity_db_path(mountpoint),
+        rows=[("movies/bad.mp4", 10, now, "aaa", "flagged", now)],
+        events=[("movies/bad.mp4", "mismatch", "expected aaa got zzz")],
+        meta={"discovery_complete": "true"},
+    )
+    r = integrity_client.get("/integrity")
+    assert "movies/bad.mp4" in r.text
+    assert "mismatch" in r.text
+
+
+def test_integrity_page_no_flagged_files_shows_all_clear(integrity_client, integrity_config_file):
+    import modules.web.app.main as m
+    cfg = yaml.safe_load(integrity_config_file.read_text())
+    mountpoint = cfg["drives"][0]["mountpoint"]
+    now = int(time.time())
+    make_integrity_db(
+        m._integrity_db_path(mountpoint),
+        rows=[("ok.txt", 10, now, "aaa", "ok", now)],
+        meta={"discovery_complete": "true"},
+    )
+    r = integrity_client.get("/integrity")
+    assert "all checks passing" in r.text.lower()
+
+
+# ── Route: GET /partials/integrity ──────────────────────────────────────────────
+
+def test_partial_integrity_returns_200(integrity_client):
+    r = integrity_client.get("/partials/integrity")
+    assert r.status_code == 200
+    assert "text/html" in r.headers["content-type"]
+
+
+def test_partial_integrity_matches_full_page_content(integrity_client):
+    full    = integrity_client.get("/integrity").text
+    partial = integrity_client.get("/partials/integrity").text
+    assert "drive1" in full
+    assert "drive1" in partial
