@@ -19,6 +19,7 @@ check_tools() {
     check_tool hdparm
     check_tool smartctl
     check_tool systemd-escape
+    check_tool sqlite3
 }
 
 check_config_file() {

@@ -125,6 +125,17 @@ for i in $(seq 0 $((n_jobs - 1))); do
     [[ "$source" == */ ]] || fail ".sync_jobs[$i].source must end with '/' (job: ${job_name}). Got: '${source}'"
     [[ "$dest"   == */ ]] || fail ".sync_jobs[$i].dest must end with '/' (job: ${job_name}). Got: '${dest}'"
 
+    # source/dest must be a strict subdirectory of a drive's mountpoint, never
+    # the mountpoint itself. A drive-root job would put .nase/ (the checksum
+    # integrity manifest, see modules/integrity) inside this rsync --delete's
+    # scope. seen_mountpoints is populated by the .drives validation above.
+    if [[ -n "${seen_mountpoints[${source%/}]+x}" ]]; then
+        fail ".sync_jobs[$i].source is a drive mountpoint root (job: ${job_name}). Got: '${source}' — use a subdirectory instead."
+    fi
+    if [[ -n "${seen_mountpoints[${dest%/}]+x}" ]]; then
+        fail ".sync_jobs[$i].dest is a drive mountpoint root (job: ${job_name}). Got: '${dest}' — use a subdirectory instead."
+    fi
+
     if [[ -n "${seen_job_names[$job_name]+x}" ]]; then
         fail "Duplicate sync job name '${job_name}'."
     fi

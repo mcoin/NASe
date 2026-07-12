@@ -47,6 +47,7 @@ run_module() {
 }
 
 run_module drives
+run_module integrity
 run_module config-archive
 
 run_module samba

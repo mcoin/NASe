@@ -49,6 +49,15 @@ modules/
     setup.sh               Installs filebrowser binary; creates systemd bind-mount units
                            to populate /srv/filebrowser with a Finder-like virtual root;
                            cleans up stale bind-mount units
+  integrity/
+    schema.sql             Per-drive checksum manifest schema (files/events/meta)
+    common.sh               Shared helpers: db path, UUID cross-check, budget calc
+    setup.sh                Creates <mountpoint>/.nase/ (root:root 0700) + schema
+    discover_and_sample.sh  Nightly budgeted discovery + oldest-checked resample
+    bootstrap.sh             Uncapped discovery, for 'nase integrity bootstrap'
+    reconcile-backup.sh      Called from sync.sh after a successful rsync run
+    reconcile-primary.sh    Consumes primary-events.log since last cursor
+                           See INTEGRITY_DESIGN.md for the full design.
   tailscale/
     setup.sh               Installs and configures Tailscale
   web/
@@ -104,6 +113,12 @@ sudo nase remount <rw|ro> [drive-name]
 nase logs [-f] [<job>]      Show/follow logs (no job = central, job name = rsync log)
 sudo nase web-restart       Restart nase-web.service
 sudo nase notify-test       Send a test notification
+sudo nase integrity status [name]
+                            Checksum manifest status: flagged files, discovery progress
+sudo nase integrity ack <name> <path>
+                            Clear a flagged file after manual review
+sudo nase integrity bootstrap <name>
+                            Run checksum discovery uncapped (full-speed baseline)
 ```
 
 ## Web dashboard (port 8088)
@@ -120,6 +135,7 @@ sudo nase notify-test       Send a test notification
 |------|---------|
 | `/mnt/primary` | Main data drive |
 | `/mnt/backup1`, `/mnt/backup2` | Backup drives (read-only at rest) |
+| `<mountpoint>/.nase/` | Per-drive checksum integrity manifest (root:root 0700 — see INTEGRITY_DESIGN.md) |
 | `/srv/filebrowser` | Virtual root: bind-mounts of primary shares + Backup/Trash |
 | `/var/lib/nase/` | Stamp files: `sync-<job>.stamp`, `web-app.hash` |
 | `/var/log/nase/nase.log` | Central log |
@@ -159,3 +175,10 @@ NOTIFY_WEBHOOK_URL
 - **Web service self-restart problem.** `modules/web/setup.sh` only restarts
   `nase-web.service` when the app code or unit file actually changed (tracked via
   sha256 stamp), so `apply.sh` triggered from the web UI doesn't kill itself.
+- **Checksum integrity manifest builds progressively, not via a blocking bootstrap.**
+  `modules/integrity` maintains a per-file checksum database on each drive
+  (disabled by default — `integrity.enabled` in config.yaml). Discovery of
+  pre-existing files and nightly resampling of known files share one budgeted
+  pass, piggybacked onto the existing nightly sync window (never triggers its
+  own drive spin-up). See `INTEGRITY_DESIGN.md` for the full design and the
+  guards protecting `.nase/` from Samba/filebrowser/`fix-ownership.sh`.

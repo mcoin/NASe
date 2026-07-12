@@ -57,7 +57,12 @@ read -r -p "Continue? [y/N] " confirm
 for t in "${targets[@]}"; do
     IFS='|' read -r name mountpoint owner <<< "$t"
     log_info "Fixing ownership on '${name}' (${mountpoint}) → ${owner}:${owner} ..."
-    chown -R "${owner}:${owner}" "$mountpoint"
+    # .nase/ (the checksum integrity manifest, see modules/integrity) is
+    # deliberately root:root 0700 so it isn't reachable through Samba or
+    # filebrowser, both of which run as the drive's 'owner'. Pruned out here
+    # so re-running this script doesn't silently undo that protection.
+    find "$mountpoint" -path "${mountpoint%/}/.nase" -prune \
+        -o -exec chown "${owner}:${owner}" {} +
     log_ok "Done: ${mountpoint}"
 done
 

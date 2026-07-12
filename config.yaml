@@ -215,6 +215,36 @@ sync_jobs:
       enabled: true
       path: /mnt/backup_daily/.trash
       retention_days: 30
+
+# --------------------------------------------------------------------------
+# Checksum integrity manifest (see INTEGRITY_DESIGN.md)
+# --------------------------------------------------------------------------
+# Maintains a per-file checksum database on each drive (<mountpoint>/.nase/)
+# to catch silent bit-rot that SMART monitoring and rsync's size/mtime-based
+# sync would both miss. Coverage builds progressively in the background —
+# no manual bootstrap required — piggybacking on the existing nightly sync
+# window so it never triggers extra drive spin-ups on its own.
+#
+# enabled:              master switch; false disables every integrity
+#                        module/script as a no-op (safe default).
+# cycle_days:            verify every known file at least once per this many
+#                        days.
+# min_sample/max_sample: files processed per drive per night, floor/ceiling.
+# skip_recent_seconds:   don't sample files touched more recently than this
+#                        (avoids racing an in-progress write on primary).
+#
+# Enable with 'sudo nase apply integrity' (or a full apply.sh run), then
+# 'sudo nase integrity status' to watch discovery progress. Uses
+# 'sudo nase integrity bootstrap <drive>' for an optional full-speed pass —
+# see INTEGRITY_DESIGN.md before running it on a multi-terabyte drive.
+# --------------------------------------------------------------------------
+integrity:
+  enabled: false
+  cycle_days: 60
+  min_sample: 200
+  max_sample: 5000
+  skip_recent_seconds: 3600
+
 services:
   web:
     enabled: true

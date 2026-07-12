@@ -32,6 +32,8 @@ PACKAGES=(
     python3-venv
     # File watch notifications
     inotify-tools
+    # Checksum integrity manifest (modules/integrity)
+    sqlite3
     # Utilities used by scripts
     curl
     wget

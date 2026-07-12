@@ -184,11 +184,12 @@ RSYNC_LOG="${NASE_LOG_DIR:-/var/log}/nase-sync-${JOB_NAME}.log"
 # from rsync's stats summary lines which also go to stdout.
 # Set up early so the EXIT trap can always clean it up.
 RSYNC_XFER_TMP=$(mktemp)
+INTEGRITY_XFER_TMP=$(mktemp)
 if [[ "$dest_should_be_ro" == "true" ]]; then
     # Override the earlier trap to include temp file cleanup alongside the remount
-    trap 'rm -f "$RSYNC_XFER_TMP"; log_info "Remounting ${dest_mount} read-only..."; mount -o remount,ro "${dest_mount}"' EXIT
+    trap 'rm -f "$RSYNC_XFER_TMP" "$INTEGRITY_XFER_TMP"; log_info "Remounting ${dest_mount} read-only..."; mount -o remount,ro "${dest_mount}"' EXIT
 else
-    trap 'rm -f "$RSYNC_XFER_TMP"' EXIT
+    trap 'rm -f "$RSYNC_XFER_TMP" "$INTEGRITY_XFER_TMP"' EXIT
 fi
 
 # macOS writes AppleDouble resource fork files (._*) and .DS_Store files to
@@ -200,10 +201,20 @@ MACOS_EXCLUDES=(
     "--exclude=.DS_Store"
 )
 
+# .nase/ holds the checksum integrity manifest (modules/integrity) and must
+# never be touched by rsync --delete. In normal operation source/dest are
+# always a strict subdirectory of a drive's mountpoint (validate-config.sh
+# enforces this) so .nase/ — which lives at the mountpoint root — is already
+# outside every job's scope; this exclude is defense-in-depth only.
+INTEGRITY_EXCLUDES=(
+    "--exclude=/.nase"
+)
+
 # shellcheck disable=SC2086
 # rsync_flags and EXTRA_FLAGS are intentionally word-split here
 if rsync $rsync_flags $EXTRA_FLAGS \
         "${MACOS_EXCLUDES[@]}" \
+        "${INTEGRITY_EXCLUDES[@]}" \
         --out-format='NXFR %n' \
         --log-file="$RSYNC_LOG" \
         "$source_path" "$dest_path" | tee "$RSYNC_XFER_TMP"; then
@@ -243,6 +254,33 @@ if rsync $rsync_flags $EXTRA_FLAGS \
     # Record successful sync time for change detection on next run
     mkdir -p "$STAMP_DIR"
     touch "$STAMP_FILE"
+
+    # ── Checksum integrity manifest ─────────────────────────────────────────────
+    # Reconcile exactly the files this run touched (no separate tree walk —
+    # see modules/integrity/reconcile-backup.sh), then let each drive's
+    # nightly discovery/resample budget run at most once per day while it's
+    # already awake for this sync (see INTEGRITY_DESIGN.md "Trigger point").
+    # Best-effort: a problem here must never fail the backup itself.
+    printf '%s\n' "$transferred" > "$INTEGRITY_XFER_TMP"
+    "${REPO_ROOT}/modules/integrity/reconcile-backup.sh" \
+        "$source_path" "$dest_path" "$INTEGRITY_XFER_TMP" "$RSYNC_LOG" \
+        || log_warn "Integrity reconcile failed for job '${JOB_NAME}' — continuing."
+
+    source_mount=$(findmnt --target "$source_path" --output TARGET --noheadings --first-only 2>/dev/null || true)
+    if [[ -n "$source_mount" ]]; then
+        # Belt-and-suspenders with the transfer-list hashing above: this
+        # consumes /var/lib/nase/primary-events.log (nase-primary-watch,
+        # inotify-based) so primary-side creates/modifies/deletes are
+        # tracked even for files this rsync run didn't itself touch, or if
+        # this job's transfer list missed something. Cheap to call from
+        # every job — a no-op once the day's events are already processed.
+        "${REPO_ROOT}/modules/integrity/reconcile-primary.sh" "$source_mount" \
+            || log_warn "Integrity primary-events reconcile failed for ${source_mount} — continuing."
+        "${REPO_ROOT}/modules/integrity/discover_and_sample.sh" "$source_mount" \
+            || log_warn "Integrity discovery/sample failed for ${source_mount} — continuing."
+    fi
+    "${REPO_ROOT}/modules/integrity/discover_and_sample.sh" "$dest_mount" \
+        || log_warn "Integrity discovery/sample failed for ${dest_mount} — continuing."
 else
     RSYNC_EXIT=$?
     END_TIME=$(date +%s)
