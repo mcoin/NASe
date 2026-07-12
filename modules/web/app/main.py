@@ -574,6 +574,11 @@ def _stream_cmd(*cmd: str) -> StreamingResponse:
 
 
 
+@_protected.get("/apply")
+async def apply_all():
+    """Stream a full `nase apply` (apply.sh) run's output as Server-Sent Events."""
+    return _stream_cmd(str(REPO_ROOT / "nase"), "apply")
+
 @_protected.get("/apply/{section}")
 async def apply_section(section: str):
     """Stream `nase apply <section>` output as Server-Sent Events."""
