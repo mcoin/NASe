@@ -63,10 +63,6 @@ samba:
       path: /mnt/primary/bd
       read_only: false
       valid_users: "nase"
-    - name: libs
-      path: /mnt/primary/libs
-      read_only: false
-      valid_users: "nase"
     - name: movies
       path: /mnt/primary/movies
       read_only: false
@@ -81,10 +77,6 @@ samba:
       valid_users: "nase"
     - name: podcasts
       path: /mnt/primary/podcasts
-      read_only: false
-      valid_users: "nase"
-    - name: science
-      path: /mnt/primary/science
       read_only: false
       valid_users: "nase"
     - name: video
@@ -149,8 +141,7 @@ sync_jobs:
   - name: bd-backup-daily
     source: /mnt/primary/bd/
     dest: /mnt/backup_daily/bd/
-    #schedule: '*-*-* 03:00:00'
-    schedule: '*-*-* *:00/05:00'
+    schedule: '*-*-* 03:00:00'
     rsync_flags: --archive --delete
     on_failure: notify
     force_sync_days: 1
