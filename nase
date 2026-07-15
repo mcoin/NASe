@@ -403,11 +403,11 @@ SQL
             log_ok "Acknowledged '${path}' on drive '${target}' — marked ok."
             ;;
         bootstrap)
-            local target="${1:-}" mp
-            [[ -n "$target" ]] || { log_error "Usage: nase integrity bootstrap <drive>"; exit 1; }
+            local target="${1:-}" limit="${2:-}" mp
+            [[ -n "$target" ]] || { log_error "Usage: nase integrity bootstrap <drive> [limit]"; exit 1; }
             mp=$(_integrity_mountpoint_for_name "$target")
             [[ -n "$mp" ]] || die "No active drive named '${target}' found in config."
-            "${REPO_ROOT}/modules/integrity/bootstrap.sh" "$mp"
+            "${REPO_ROOT}/modules/integrity/bootstrap.sh" "$mp" "$limit"
             ;;
         *)
             log_error "Usage: nase integrity <status|ack|bootstrap> ..."
@@ -602,8 +602,10 @@ ${_C_BOLD}Commands:${_C_RST}
   integrity status [name] Show checksum manifest status (flagged files, discovery progress)
   integrity ack <name> <path>
                           Clear a flagged file after manual review
-  integrity bootstrap <name>
-                          Run the checksum discovery pass uncapped (full-speed baseline)
+  integrity bootstrap <name> [limit]
+                          Run the checksum discovery pass uncapped (full-speed baseline).
+                          With [limit], stop after that many new files — safe to
+                          re-run (e.g. daily) to spread a big backlog over several days.
   logs [-f] [<job>]       Show recent log entries; -f to follow
                             (no job = central log, job name = that job's rsync log)
   web-restart             Restart the web dashboard service

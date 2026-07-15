@@ -54,7 +54,7 @@ modules/
     common.sh               Shared helpers: db path, UUID cross-check, budget calc
     setup.sh                Creates <mountpoint>/.nase/ (root:root 0700) + schema
     discover_and_sample.sh  Nightly budgeted discovery + oldest-checked resample
-    bootstrap.sh             Uncapped discovery, for 'nase integrity bootstrap'
+    bootstrap.sh             Uncapped (optionally limited) discovery, for 'nase integrity bootstrap'
     reconcile-backup.sh      Called from sync.sh after a successful rsync run
     reconcile-primary.sh    Consumes primary-events.log since last cursor
                            See INTEGRITY_DESIGN.md for the full design.
@@ -117,8 +117,10 @@ sudo nase integrity status [name]
                             Checksum manifest status: flagged files, discovery progress
 sudo nase integrity ack <name> <path>
                             Clear a flagged file after manual review
-sudo nase integrity bootstrap <name>
-                            Run checksum discovery uncapped (full-speed baseline)
+sudo nase integrity bootstrap <name> [limit]
+                            Run checksum discovery uncapped (full-speed baseline).
+                            With [limit], stop after that many new files — safe to
+                            re-run (e.g. daily) to spread a big backlog over several days.
 ```
 
 ## Web dashboard (port 8088)

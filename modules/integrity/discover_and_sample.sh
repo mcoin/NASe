@@ -13,7 +13,9 @@
 # once discovery_complete=true, phase 1 is skipped entirely and only the
 # indexed SQL resample query runs.
 #
-# Usage: discover_and_sample.sh <mountpoint> [--uncapped]
+# Usage: discover_and_sample.sh <mountpoint> [--uncapped [limit]]
+# A LIMIT after --uncapped caps this invocation to that many newly-hashed
+# files instead of draining the whole remaining backlog — see bootstrap.sh.
 set -euo pipefail
 
 REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
@@ -23,8 +25,12 @@ source "${REPO_ROOT}/modules/integrity/common.sh"
 
 MOUNTPOINT="${1:-}"
 UNCAPPED=false
-[[ "${2:-}" == "--uncapped" ]] && UNCAPPED=true
-[[ -n "$MOUNTPOINT" ]] || { log_error "Usage: discover_and_sample.sh <mountpoint> [--uncapped]"; exit 1; }
+UNCAPPED_LIMIT=""
+if [[ "${2:-}" == "--uncapped" ]]; then
+    UNCAPPED=true
+    UNCAPPED_LIMIT="${3:-}"
+fi
+[[ -n "$MOUNTPOINT" ]] || { log_error "Usage: discover_and_sample.sh <mountpoint> [--uncapped [limit]]"; exit 1; }
 
 if ! config_bool '.integrity.enabled' 2>/dev/null; then
     exit 0
@@ -35,6 +41,20 @@ DB=$(integrity_db_path "$MOUNTPOINT")
 
 STAMP_DIR="${NASE_STAMP_DIR:-/var/lib/nase}"
 mkdir -p "$STAMP_DIR"
+
+# Scratch files (the full per-drive file listing plus SQL batches) live under
+# .nase/tmp on the drive itself, not system /tmp. /tmp is a RAM-backed tmpfs
+# sized off the Pi's total RAM (commonly ~1-2G) — a plain `find` listing of a
+# multi-million-file, multi-terabyte drive can already exceed that on its
+# own, so scratch space needs to scale with the drive, not the Pi. .nase/tmp
+# sits inside the already-pruned ".nase" path (see phase 1 below), so it's
+# automatically excluded from being walked/hashed.
+SCRATCH_DIR="${MOUNTPOINT%/}/.nase/tmp"
+mkdir -p "$SCRATCH_DIR"
+chmod 0700 "$SCRATCH_DIR"
+# Unlike /tmp, this doesn't get cleared by a reboot — sweep anything a prior
+# run left behind (e.g. killed mid-run) before adding this run's own files.
+find "$SCRATCH_DIR" -mindepth 1 -maxdepth 1 -type f -delete
 
 declare -a TMPFILES=()
 trap 'rm -f "${TMPFILES[@]}"' EXIT
@@ -73,8 +93,17 @@ MIN_SAMPLE=$(config_get '.integrity.min_sample');          MIN_SAMPLE="${MIN_SAM
 MAX_SAMPLE=$(config_get '.integrity.max_sample');          MAX_SAMPLE="${MAX_SAMPLE:-5000}"
 SKIP_RECENT=$(config_get '.integrity.skip_recent_seconds'); SKIP_RECENT="${SKIP_RECENT:-3600}"
 
+# Fixed checkpoint size for the hashing loop below (not config-driven — this
+# just bounds how much work a crash mid-run can lose; nightly capped runs are
+# already well under this, it only matters for large --uncapped batches).
+COMMIT_BATCH_SIZE=2000
+
 if [[ "$UNCAPPED" == "true" ]]; then
-    BUDGET=999999999
+    # A bounded bootstrap run (--uncapped N) still hashes at full speed with
+    # no once-per-day guard, but stops after N new files so a multi-million
+    # file backlog can be worked through in safe, resumable increments
+    # (e.g. one run a day) instead of a single all-or-nothing pass.
+    BUDGET="${UNCAPPED_LIMIT:-999999999}"
 else
     BUDGET=$(integrity_budget "$DB" "$CYCLE_DAYS" "$MIN_SAMPLE" "$MAX_SAMPLE")
 fi
@@ -87,8 +116,8 @@ hashed_count=0
 discovery_complete=$(integrity_meta_get "$DB" "discovery_complete")
 
 if [[ "$discovery_complete" != "true" ]]; then
-    tmp_list=$(mktemp); TMPFILES+=("$tmp_list")
-    tmp_chunk=$(mktemp); TMPFILES+=("$tmp_chunk")
+    tmp_list=$(mktemp -p "$SCRATCH_DIR"); TMPFILES+=("$tmp_list")
+    tmp_chunk=$(mktemp -p "$SCRATCH_DIR"); TMPFILES+=("$tmp_chunk")
 
     # .nase/ itself must never be walked into: its DB is written to by this
     # very script, so indexing it would immediately "detect corruption" in
@@ -115,10 +144,15 @@ if [[ "$discovery_complete" != "true" ]]; then
         remaining=$(( total - cursor ))
         (( chunk_size > remaining )) && chunk_size=$remaining
 
-        tail -n +"$((cursor + 1))" "$tmp_list" | head -n "$chunk_size" \
-            | sed "s|^${MOUNTPOINT%/}/||" > "$tmp_chunk"
+        # A tail|head pipe here would let head close its input early once it
+        # has chunk_size lines, SIGPIPEing tail — fatal under `set -o
+        # pipefail` on a multi-million-line list. A single sed pass with a
+        # `q` at the range end avoids any early-closing consumer.
+        _range_end=$(( cursor + chunk_size ))
+        sed -n "$((cursor + 1)),${_range_end}{s|^${MOUNTPOINT%/}/||;p};${_range_end}q" \
+            "$tmp_list" > "$tmp_chunk"
 
-        candidates_sql=$(mktemp); TMPFILES+=("$candidates_sql")
+        candidates_sql=$(mktemp -p "$SCRATCH_DIR"); TMPFILES+=("$candidates_sql")
         {
             echo "CREATE TEMP TABLE candidates(path TEXT PRIMARY KEY);"
             echo "BEGIN;"
@@ -146,8 +180,14 @@ if [[ "$discovery_complete" != "true" ]]; then
         fi
 
         if [[ -n "$new_paths" ]]; then
-            batch_sql=$(mktemp); TMPFILES+=("$batch_sql")
+            # Flushed every COMMIT_BATCH_SIZE files rather than accumulated into
+            # one transaction for the whole window — on a bounded --uncapped
+            # run that window can be tens or hundreds of thousands of files, and
+            # without checkpointing a crash near the end would lose the entire
+            # run's hashing instead of just the current batch.
+            batch_sql=$(mktemp -p "$SCRATCH_DIR"); TMPFILES+=("$batch_sql")
             echo "BEGIN;" > "$batch_sql"
+            batch_n=0
             while IFS= read -r relpath; do
                 [[ -n "$relpath" ]] || continue
                 abspath=$(integrity_abspath "$MOUNTPOINT" "$relpath")
@@ -159,9 +199,18 @@ if [[ "$discovery_complete" != "true" ]]; then
                 esc_path=$(_integrity_escape "$relpath")
                 echo "INSERT INTO files (path, size, mtime, checksum, status, first_seen, last_updated, last_checked) VALUES ('${esc_path}', ${fsize}, ${fmtime}, '${sum}', 'ok', ${NOW}, ${NOW}, ${NOW});" >> "$batch_sql"
                 (( hashed_count++ )) || true
+                (( batch_n++ )) || true
+                if (( batch_n >= COMMIT_BATCH_SIZE )); then
+                    echo "COMMIT;" >> "$batch_sql"
+                    sqlite3 -bail -cmd ".timeout 30000" "$DB" < "$batch_sql"
+                    echo "BEGIN;" > "$batch_sql"
+                    batch_n=0
+                fi
             done <<< "$new_paths"
-            echo "COMMIT;" >> "$batch_sql"
-            sqlite3 -bail -cmd ".timeout 30000" "$DB" < "$batch_sql"
+            if (( batch_n > 0 )); then
+                echo "COMMIT;" >> "$batch_sql"
+                sqlite3 -bail -cmd ".timeout 30000" "$DB" < "$batch_sql"
+            fi
         fi
 
         if [[ "$window_fully_covered" == "true" ]]; then
@@ -185,7 +234,7 @@ fi
 remaining_budget=$(( BUDGET - hashed_count ))
 if [[ "$UNCAPPED" != "true" ]] && [[ "$remaining_budget" -gt 0 ]]; then
     cutoff=$(( NOW - SKIP_RECENT ))
-    resample_sql=$(mktemp); TMPFILES+=("$resample_sql")
+    resample_sql=$(mktemp -p "$SCRATCH_DIR"); TMPFILES+=("$resample_sql")
     cat > "$resample_sql" <<SQL
 .separator "	"
 SELECT id, path, size, mtime, checksum FROM files
@@ -195,7 +244,7 @@ SQL
     resample_rows=$(sqlite3 -bail -cmd ".timeout 30000" "$DB" < "$resample_sql")
 
     if [[ -n "$resample_rows" ]]; then
-        batch_sql=$(mktemp); TMPFILES+=("$batch_sql")
+        batch_sql=$(mktemp -p "$SCRATCH_DIR"); TMPFILES+=("$batch_sql")
         echo "BEGIN;" > "$batch_sql"
         while IFS=$'\t' read -r id relpath rsize rmtime rchecksum; do
             [[ -n "$id" ]] || continue

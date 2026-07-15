@@ -239,7 +239,7 @@ sync_jobs:
 # see INTEGRITY_DESIGN.md before running it on a multi-terabyte drive.
 # --------------------------------------------------------------------------
 integrity:
-  enabled: false
+  enabled: true
   cycle_days: 60
   min_sample: 200
   max_sample: 5000

@@ -130,7 +130,13 @@ same blind spot as before the feature existed, spread across the ramp-up
 period instead of concentrated in one multi-hour, disk-and-CPU-hammering
 run. `nase integrity bootstrap <drive>` re-runs the same discovery logic
 with no budget cap, for a deliberate full-speed pass (e.g. right after
-physically swapping in a new backup drive).
+physically swapping in a new backup drive). `nase integrity bootstrap
+<drive> <limit>` caps that pass to `<limit>` newly-hashed files instead of
+draining the whole backlog in one go — progress commits in batches rather
+than one final transaction, and the cursor persists across runs, so a
+multi-million-file backlog can be worked through in safe, resumable
+increments (e.g. one run a day) instead of a single hours-long,
+all-or-nothing pass.
 
 ## Sampling scheduler
 
