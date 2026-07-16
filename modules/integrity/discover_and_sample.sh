@@ -59,20 +59,38 @@ find "$SCRATCH_DIR" -mindepth 1 -maxdepth 1 -type f -delete
 declare -a TMPFILES=()
 trap 'rm -f "${TMPFILES[@]}"' EXIT
 
+# ── Cross-mode lock ───────────────────────────────────────────────────────────
+# One drive, one discover_and_sample.sh writer at a time — a regular
+# (per-sync-job) call and a manual --uncapped bootstrap must never touch the
+# same drive's DB concurrently (a bootstrap's multi-hour transaction racing a
+# same-night nightly pass is exactly what corrupted a COMMIT once before).
+# Neither side ever blocks waiting for the other — whichever call loses the
+# race is simply cancelled outright: a regular call skips for the night (it
+# resumes tomorrow, and a sync job must never stall behind an hours-long
+# bootstrap); a bootstrap exits with an error telling the operator to re-run
+# once the nightly pass — a few minutes at most — has finished.
+_lock_name="${MOUNTPOINT#/}"
+_lock_name="${_lock_name//\//-}"
+_lock_file="${STAMP_DIR}/integrity-${_lock_name}.lock"
+exec {_INTEGRITY_LOCK_FD}>"$_lock_file"
+if ! flock --exclusive --nonblock "$_INTEGRITY_LOCK_FD"; then
+    if [[ "$UNCAPPED" == "true" ]]; then
+        log_error "Integrity: ${MOUNTPOINT} has a regular pass in progress — cancelling bootstrap. Try again shortly."
+        exit 1
+    else
+        log_info "Integrity: ${MOUNTPOINT} bootstrap in progress — cancelling tonight's pass."
+        exit 0
+    fi
+fi
+
 # ── Once-per-day guard ────────────────────────────────────────────────────────
 # Multiple sync jobs may call this for the same drive on the same night
-# (e.g. up to 8 jobs all touch backup_daily). A lock avoids two invocations
-# racing on the same DB; the date-stamp makes repeat calls within the same
-# day free no-ops so callers never need to know whether they're "first".
-# --uncapped (manual bootstrap) bypasses both — it's a deliberate one-off run.
+# (e.g. up to 8 jobs all touch backup_daily). The date-stamp makes repeat
+# calls within the same day free no-ops so callers never need to know
+# whether they're "first". --uncapped (manual bootstrap) bypasses this —
+# it's a deliberate one-off run, not the nightly budgeted pass.
 _date_stamp=""
 if [[ "$UNCAPPED" != "true" ]]; then
-    _lock_name="${MOUNTPOINT#/}"
-    _lock_name="${_lock_name//\//-}"
-    _lock_file="${STAMP_DIR}/integrity-${_lock_name}.lock"
-    exec {_INTEGRITY_LOCK_FD}>"$_lock_file"
-    flock --exclusive "$_INTEGRITY_LOCK_FD"
-
     _date_stamp="${STAMP_DIR}/integrity-${_lock_name}.date"
     _today=$(date +%Y-%m-%d)
     if [[ -f "$_date_stamp" ]] && [[ "$(cat "$_date_stamp")" == "$_today" ]]; then
