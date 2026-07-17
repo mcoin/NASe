@@ -603,9 +603,11 @@ ${_C_BOLD}Commands:${_C_RST}
   integrity ack <name> <path>
                           Clear a flagged file after manual review
   integrity bootstrap <name> [limit]
-                          Run the checksum discovery pass uncapped (full-speed baseline).
-                          With [limit], stop after that many new files — safe to
-                          re-run (e.g. daily) to spread a big backlog over several days.
+                          Run checksum discovery at full speed. With no [limit], runs
+                          as a sequence of 200000-file passes until discovery
+                          completes. With [limit], stop after that many new files —
+                          safe to re-run (e.g. daily) to spread a big backlog over
+                          several days.
   logs [-f] [<job>]       Show recent log entries; -f to follow
                             (no job = central log, job name = that job's rsync log)
   web-restart             Restart the web dashboard service
