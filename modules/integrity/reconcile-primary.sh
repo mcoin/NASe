@@ -76,6 +76,10 @@ while IFS=$'\t' read -r ts op filepath; do
         "${MOUNTPOINT%/}"/*) ;;
         *) continue ;;   # event under a different watch root than requested
     esac
+    case "$filepath" in
+        "${MOUNTPOINT%/}/.nase"|"${MOUNTPOINT%/}/.nase/"*|"${MOUNTPOINT%/}/.trash"|"${MOUNTPOINT%/}/.trash/"*)
+            continue ;;   # never index the manifest's own files — see discover_and_sample.sh
+    esac
     relpath=$(integrity_relpath "$MOUNTPOINT" "$filepath")
     esc_path=$(_integrity_escape "$relpath")
 

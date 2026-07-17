@@ -58,8 +58,15 @@ while IFS= read -r line; do
     printf '%s\t%s\t%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$op" "$filepath" \
         >> "$EVENTS_LOG"
 done < <(
+    # .nase/ (the integrity manifest, root:root 0700) and .trash/ must never
+    # surface here: reconcile-primary.sh consumes this log and would try to
+    # hash the manifest DB itself, and the web dashboard's changes page would
+    # show its internal churn (e.g. bootstrap scratch files) as if it were
+    # user activity. --exclude keeps inotifywait from even watching those
+    # subtrees, same intent as discover_and_sample.sh's `find -prune`.
     inotifywait -m -r \
         --format '%e %w%f' \
+        --exclude '/\.(nase|trash)(/|$)' \
         --event close_write \
         --event delete \
         --event moved_from \

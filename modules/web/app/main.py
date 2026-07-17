@@ -215,6 +215,12 @@ def read_log(job: str | None, lines: int = 80) -> list[dict]:
     return result
 
 # ── File changes ───────────────────────────────────────────────────────────
+# .nase/ (integrity manifest internals) and .trash/ (sync retention) are
+# internal bookkeeping, not user activity — never show them here, even for
+# entries logged before record.sh started excluding them (retention is 90
+# days, so old entries can linger).
+_CHANGES_EXCLUDE_RE = re.compile(r"^/mnt/[^/]+/\.(nase|trash)(/|$)")
+
 def build_changes(window: str = "day", page: int = 1, group: bool = False) -> dict:
     secs = _WINDOW_SECS.get(window, 86400)
     since_str = datetime.fromtimestamp(datetime.now().timestamp() - secs).strftime("%Y-%m-%d %H:%M:%S")
@@ -233,6 +239,8 @@ def build_changes(window: str = "day", page: int = 1, group: bool = False) -> di
             continue
         ts, op, path = parts
         if ts < since_str:
+            continue
+        if _CHANGES_EXCLUDE_RE.match(path):
             continue
         counts[path] = counts.get(path, 0) + 1
         if path not in latest_ts or ts > latest_ts[path]:
