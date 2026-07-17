@@ -67,9 +67,10 @@ main {
   letter-spacing: 0.06em;
   color: var(--muted);
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 0.75rem;
+  gap: 0.5rem 0.75rem;
 }
 
 .card-body { padding: 0; }
@@ -87,6 +88,45 @@ main {
 
 @media (max-width: 640px) {
   .status-grid { grid-template-columns: 1fr; }
+}
+
+/* ── Responsive tables (stacked cards below 640px) ────────────────────────── */
+/* Opt-in via .responsive-table — turns each row into a bordered card with
+   label:value pairs stacked vertically (label from data-label), so every
+   column stays visible on a phone instead of being pushed off-screen or
+   requiring a sideways swipe to discover. */
+@media (max-width: 640px) {
+  .responsive-table thead { display: none; }
+
+  .responsive-table, .responsive-table tbody, .responsive-table tr {
+    display: block;
+    width: 100%;
+  }
+
+  .responsive-table tr {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 0.6rem 0.75rem;
+    margin: 0.6rem 1rem;
+  }
+
+  .responsive-table td {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.15rem;
+    padding: 0.3rem 0;
+    border-bottom: none;
+  }
+
+  .responsive-table td::before {
+    content: attr(data-label);
+    font-size: 0.65rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+  }
 }
 
 /* ── Tables ──────────────────────────────────────────────────────────────── */
@@ -641,8 +681,9 @@ td.mono  { font-family: monospace; font-size: 0.8rem; color: var(--muted); }
 
 .integrity-title {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: 0.6rem;
+  gap: 0.4rem 0.6rem;
   text-transform: none;
   letter-spacing: normal;
   font-size: 0.85rem;

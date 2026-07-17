@@ -4,7 +4,7 @@
   <div class="card">
     <div class="card-head">Services</div>
     <div class="card-body">
-      <table>
+      <table class="responsive-table">
         <thead>
           <tr>
             <th>Service</th>
@@ -15,8 +15,8 @@
         <tbody>
           {% for svc in status.services %}
           <tr>
-            <td>{{ svc.name }}</td>
-            <td>
+            <td data-label="Service">{{ svc.name }}</td>
+            <td data-label="Status">
               {% if svc.state == "active" %}
                 <span class="badge badge-ok">active</span>
               {% elif svc.state == "failed" %}
@@ -25,7 +25,7 @@
                 <span class="badge badge-warn">{{ svc.state }}</span>
               {% endif %}
             </td>
-            <td class="muted">
+            <td class="muted" data-label="Detail">
               {% if svc.detail_label %}{{ svc.detail_label }}&nbsp;{% endif %}{{ svc.detail }}
             </td>
           </tr>
@@ -39,7 +39,7 @@
   <div class="card">
     <div class="card-head">Drives</div>
     <div class="card-body">
-      <table>
+      <table class="responsive-table">
         <thead>
           <tr>
             <th>Name</th>
@@ -52,9 +52,9 @@
         <tbody>
           {% for d in status.drives %}
           <tr>
-            <td>{{ d.name }}</td>
-            <td class="mono">{{ d.mountpoint }}</td>
-            <td>
+            <td data-label="Name">{{ d.name }}</td>
+            <td class="mono" data-label="Mountpoint">{{ d.mountpoint }}</td>
+            <td data-label="Status">
               {% if d.status == "mounted" %}
                 <span class="badge badge-ok">mounted</span>
               {% elif d.status == "inactive" %}
@@ -63,8 +63,8 @@
                 <span class="badge badge-err">{{ d.status }}</span>
               {% endif %}
             </td>
-            <td class="muted">{{ d.mode or "—" }}</td>
-            <td class="muted">{{ d.usage or "—" }}</td>
+            <td class="muted" data-label="Mode">{{ d.mode or "—" }}</td>
+            <td class="muted" data-label="Usage">{{ d.usage or "—" }}</td>
           </tr>
           {% endfor %}
         </tbody>
@@ -76,7 +76,7 @@
   <div class="card card-timers">
     <div class="card-head">Sync Timers</div>
     <div class="card-body">
-      <table>
+      <table class="responsive-table">
         <thead>
           <tr>
             <th>Job</th>
@@ -88,8 +88,8 @@
         <tbody>
           {% for t in status.timers %}
           <tr>
-            <td>{{ t.name }}</td>
-            <td>
+            <td data-label="Job">{{ t.name }}</td>
+            <td data-label="Status">
               {% if t.state == "active" %}
                 <span class="badge badge-ok">active</span>
               {% elif t.state == "failed" %}
@@ -98,8 +98,8 @@
                 <span class="badge badge-warn">{{ t.state }}</span>
               {% endif %}
             </td>
-            <td class="muted">{{ t.next }}</td>
-            <td class="muted">
+            <td class="muted" data-label="Next Trigger">{{ t.next }}</td>
+            <td class="muted" data-label="Last Sync">
               {% if t.last == "never" %}
                 never
               {% else %}

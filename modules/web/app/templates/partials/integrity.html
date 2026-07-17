@@ -70,7 +70,7 @@
     {% if d.flagged_rows|length == 0 %}
     <div class="changes-empty">No flagged files — all checks passing.</div>
     {% else %}
-    <table>
+    <table class="responsive-table">
       <thead>
         <tr>
           <th>Path</th>
@@ -82,16 +82,16 @@
       <tbody>
         {% for row in d.flagged_rows %}
         <tr>
-          <td class="mono">{{ row.path }}</td>
-          <td>
+          <td class="mono" data-label="Path">{{ row.path }}</td>
+          <td data-label="Issue">
             {% if row.event_type == "missing" %}
               <span class="badge badge-warn">missing</span>
             {% else %}
               <span class="badge badge-err">{{ row.event_type }}</span>
             {% endif %}
           </td>
-          <td class="muted">{{ row.detail or "—" }}</td>
-          <td class="muted">{{ row.checked }}</td>
+          <td class="muted" data-label="Detail">{{ row.detail or "—" }}</td>
+          <td class="muted" data-label="Flagged">{{ row.checked }}</td>
         </tr>
         {% endfor %}
       </tbody>
