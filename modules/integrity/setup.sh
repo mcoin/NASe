@@ -43,25 +43,44 @@ for i in $(seq 0 $((n - 1))); do
     is_ro=$(findmnt --target "$mountpoint" --output OPTIONS --noheadings --first-only \
         | grep -qw ro && echo true || echo false)
 
+    # WAL needs to create a -shm file even for plain reads, which fails on a
+    # filesystem mounted read-only. Backup drives spend most of their life
+    # read-only at rest (reads must keep working then), so only a drive
+    # that's never read-only at rest (config's read_only: false, i.e.
+    # primary) gets WAL. This is the one that actually needs it: a bootstrap
+    # run holds a writer transaction open for hours while the web
+    # dashboard's integrity page polls the same file read-only every 60s
+    # (see main.py) — under the default journal mode a reader's SHARED lock
+    # can block the writer's COMMIT, which is what produced "cannot commit -
+    # no transaction is active" crashes.
+    if [[ "$read_only" == "true" ]]; then
+        target_journal_mode="delete"
+    else
+        target_journal_mode="wal"
+    fi
+
+    _set_journal_mode() {
+        local current
+        current=$(sqlite3 "$db" "PRAGMA journal_mode;")
+        [[ "$current" == "$target_journal_mode" ]] && return 0
+        if [[ "$is_ro" == "true" ]]; then
+            mount -o remount,rw "$mountpoint" \
+                || { log_error "  Cannot remount ${mountpoint} rw — skipping journal mode migration."; return 0; }
+            sqlite3 "$db" "PRAGMA journal_mode=${target_journal_mode};" >/dev/null
+            mount -o remount,ro "$mountpoint" \
+                || log_warn "  Failed to remount ${mountpoint} ro — drive left writable."
+        else
+            sqlite3 "$db" "PRAGMA journal_mode=${target_journal_mode};" >/dev/null
+        fi
+    }
+
     if [[ -f "$db" ]]; then
         log_info "  Drive '${name}': manifest already exists (${db})."
         # Re-assert permissions every run in case something (e.g. a manual
         # 'fix-ownership.sh' run predating its .nase exclusion) changed them.
         chown root:root "$nase_dir"
         chmod 0700 "$nase_dir"
-        # Retroactively migrate DBs created before WAL became the default
-        # (schema.sql's PRAGMA only applies at creation time) — a no-op once
-        # already on WAL. Needs a rw remount on backup drives, which are
-        # read-only at rest.
-        if [[ "$is_ro" == "true" ]]; then
-            mount -o remount,rw "$mountpoint" \
-                || { log_error "  Cannot remount ${mountpoint} rw — skipping WAL migration."; continue; }
-            sqlite3 "$db" "PRAGMA journal_mode=WAL;" >/dev/null
-            mount -o remount,ro "$mountpoint" \
-                || log_warn "  Failed to remount ${mountpoint} ro — drive left writable."
-        else
-            sqlite3 "$db" "PRAGMA journal_mode=WAL;" >/dev/null
-        fi
+        _set_journal_mode
         continue
     fi
 
@@ -70,6 +89,7 @@ for i in $(seq 0 $((n - 1))); do
         chown root:root "$nase_dir"
         chmod 0700 "$nase_dir"
         sqlite3 "$db" < "$INTEGRITY_SCHEMA"
+        sqlite3 "$db" "PRAGMA journal_mode=${target_journal_mode};" >/dev/null
         chown root:root "$db"
         chmod 0600 "$db"
         local uuid

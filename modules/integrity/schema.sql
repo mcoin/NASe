@@ -3,14 +3,11 @@
 -- .nase/integrity.db (see modules/integrity/setup.sh).
 -- See INTEGRITY_DESIGN.md for the full design.
 
--- WAL instead of the default rollback journal: a bootstrap run holds a
--- writer transaction open for hours, while the web dashboard's integrity
--- page polls this same file read-only every 60s (see main.py). Under the
--- default journal mode a reader's SHARED lock can block the writer's COMMIT
--- (needs to briefly escalate to EXCLUSIVE), which is exactly the kind of
--- contention that produced "cannot commit - no transaction is active"
--- crashes. WAL lets readers and the one writer proceed fully concurrently.
-PRAGMA journal_mode=WAL;
+-- Journal mode (WAL vs the default rollback journal) is set per-drive by
+-- modules/integrity/setup.sh, not here — WAL needs to create a -shm file
+-- even for plain reads, which fails on a filesystem mounted read-only, so
+-- it's only safe for drives that are never read-only at rest. See setup.sh
+-- for the full rationale.
 
 CREATE TABLE IF NOT EXISTS files (
   id            INTEGER PRIMARY KEY,
