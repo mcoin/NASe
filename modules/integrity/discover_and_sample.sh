@@ -116,6 +116,14 @@ SKIP_RECENT=$(config_get '.integrity.skip_recent_seconds'); SKIP_RECENT="${SKIP_
 # already well under this, it only matters for large --uncapped batches).
 COMMIT_BATCH_SIZE=2000
 
+# Files per integrity_batch_hash() call (not config-driven, same rationale
+# as COMMIT_BATCH_SIZE) — forking `stat`/`sha256sum` once per file was the
+# dominant cost of a large --uncapped pass (a 200000-file run forked 400000
+# processes just for this step). Batching cuts that by ~this factor.
+HASH_BATCH_SIZE=500
+
+_MP_PREFIX="${MOUNTPOINT%/}/"
+
 if [[ "$UNCAPPED" == "true" ]]; then
     # A bounded bootstrap run (--uncapped N) still hashes at full speed with
     # no once-per-day guard, but stops after N new files so a multi-million
@@ -206,25 +214,39 @@ if [[ "$discovery_complete" != "true" ]]; then
             batch_sql=$(mktemp -p "$SCRATCH_DIR"); TMPFILES+=("$batch_sql")
             echo "BEGIN;" > "$batch_sql"
             batch_n=0
+            declare -a hash_batch=()
+
+            _flush_hash_batch() {
+                [[ ${#hash_batch[@]} -gt 0 ]] || return 0
+                local size mtime sum abspath relpath esc_path
+                while IFS=$'\t' read -r size mtime sum abspath; do
+                    [[ -n "$abspath" ]] || continue
+                    relpath="${abspath#"$_MP_PREFIX"}"
+                    esc_path="${relpath//\'/\'\'}"
+                    echo "INSERT INTO files (path, size, mtime, checksum, status, first_seen, last_updated, last_checked) VALUES ('${esc_path}', ${size}, ${mtime}, '${sum}', 'ok', ${NOW}, ${NOW}, ${NOW});" >> "$batch_sql"
+                    (( hashed_count++ )) || true
+                    (( batch_n++ )) || true
+                    if (( batch_n >= COMMIT_BATCH_SIZE )); then
+                        echo "COMMIT;" >> "$batch_sql"
+                        sqlite3 -bail -cmd ".timeout 30000" "$DB" < "$batch_sql"
+                        echo "BEGIN;" > "$batch_sql"
+                        batch_n=0
+                    fi
+                done < <(integrity_batch_hash "${hash_batch[@]}")
+                hash_batch=()
+            }
+
             while IFS= read -r relpath; do
                 [[ -n "$relpath" ]] || continue
-                abspath=$(integrity_abspath "$MOUNTPOINT" "$relpath")
-                [[ -f "$abspath" ]] || continue    # vanished between listing and hashing
-                sum=$(integrity_sha256 "$abspath")
-                [[ -n "$sum" ]] || continue         # unreadable — leave for a future pass
-                st=$(stat -c '%s %Y' "$abspath" 2>/dev/null) || continue
-                fsize="${st%% *}"; fmtime="${st##* }"
-                esc_path=$(_integrity_escape "$relpath")
-                echo "INSERT INTO files (path, size, mtime, checksum, status, first_seen, last_updated, last_checked) VALUES ('${esc_path}', ${fsize}, ${fmtime}, '${sum}', 'ok', ${NOW}, ${NOW}, ${NOW});" >> "$batch_sql"
-                (( hashed_count++ )) || true
-                (( batch_n++ )) || true
-                if (( batch_n >= COMMIT_BATCH_SIZE )); then
-                    echo "COMMIT;" >> "$batch_sql"
-                    sqlite3 -bail -cmd ".timeout 30000" "$DB" < "$batch_sql"
-                    echo "BEGIN;" > "$batch_sql"
-                    batch_n=0
+                abspath="${_MP_PREFIX}${relpath}"
+                [[ -f "$abspath" ]] || continue    # vanished between listing and hashing (bash builtin test, no fork)
+                hash_batch+=("$abspath")
+                if (( ${#hash_batch[@]} >= HASH_BATCH_SIZE )); then
+                    _flush_hash_batch
                 fi
             done <<< "$new_paths"
+            _flush_hash_batch
+
             if (( batch_n > 0 )); then
                 echo "COMMIT;" >> "$batch_sql"
                 sqlite3 -bail -cmd ".timeout 30000" "$DB" < "$batch_sql"
@@ -264,41 +286,68 @@ SQL
     if [[ -n "$resample_rows" ]]; then
         batch_sql=$(mktemp -p "$SCRATCH_DIR"); TMPFILES+=("$batch_sql")
         echo "BEGIN;" > "$batch_sql"
+        declare -a chunk_ids=() chunk_relpaths=() chunk_rsizes=() chunk_rmtimes=() chunk_rchecksums=() chunk_abspaths=()
+
+        _flush_resample_chunk() {
+            [[ ${#chunk_ids[@]} -gt 0 ]] || return 0
+            local -A hsize=() hmtime=() hsum=()
+            local size mtime sum abspath
+            while IFS=$'\t' read -r size mtime sum abspath; do
+                [[ -n "$abspath" ]] || continue
+                hsize["$abspath"]="$size"; hmtime["$abspath"]="$mtime"; hsum["$abspath"]="$sum"
+            done < <(integrity_batch_hash "${chunk_abspaths[@]}")
+
+            local i id relpath rsize rmtime rchecksum abspath esc_path fsize fmtime sum
+            for i in "${!chunk_ids[@]}"; do
+                id="${chunk_ids[$i]}"; relpath="${chunk_relpaths[$i]}"
+                rsize="${chunk_rsizes[$i]}"; rmtime="${chunk_rmtimes[$i]}"; rchecksum="${chunk_rchecksums[$i]}"
+                abspath="${chunk_abspaths[$i]}"
+                esc_path="${relpath//\'/\'\'}"
+
+                # Vanished/became unreadable between the -f check below and
+                # this batch running — leave it for next cycle, same as the
+                # fork-per-file code's `|| continue` on a stat/hash failure.
+                [[ -n "${hsize[$abspath]+x}" ]] || continue
+
+                fsize="${hsize[$abspath]}"; fmtime="${hmtime[$abspath]}"; sum="${hsum[$abspath]}"
+
+                if [[ "$fsize" != "$rsize" || "$fmtime" != "$rmtime" ]]; then
+                    # Legitimate change the reconcile hook should already have
+                    # caught — refresh the record silently, no alert.
+                    echo "UPDATE files SET size=${fsize}, mtime=${fmtime}, checksum='${sum}', last_updated=${NOW}, last_checked=${NOW} WHERE id=${id};" >> "$batch_sql"
+                elif [[ "$sum" == "$rchecksum" ]]; then
+                    echo "UPDATE files SET last_checked=${NOW} WHERE id=${id};" >> "$batch_sql"
+                else
+                    echo "UPDATE files SET status='flagged', last_checked=${NOW} WHERE id=${id};" >> "$batch_sql"
+                    echo "INSERT INTO events (ts, path, event_type, detail) VALUES (${NOW}, '${esc_path}', 'mismatch', 'expected ${rchecksum} got ${sum}');" >> "$batch_sql"
+                    FLAGGED_PATHS+=("MISMATCH: ${relpath}")
+                fi
+            done
+
+            chunk_ids=(); chunk_relpaths=(); chunk_rsizes=(); chunk_rmtimes=(); chunk_rchecksums=(); chunk_abspaths=()
+        }
+
         while IFS=$'\t' read -r id relpath rsize rmtime rchecksum; do
             [[ -n "$id" ]] || continue
-            abspath=$(integrity_abspath "$MOUNTPOINT" "$relpath")
-            esc_path=$(_integrity_escape "$relpath")
+            abspath="${_MP_PREFIX}${relpath}"
 
             if [[ ! -f "$abspath" ]]; then
+                esc_path="${relpath//\'/\'\'}"
                 echo "UPDATE files SET status='flagged', last_checked=${NOW} WHERE id=${id};" >> "$batch_sql"
                 echo "INSERT INTO events (ts, path, event_type, detail) VALUES (${NOW}, '${esc_path}', 'missing', 'file no longer present at scheduled check');" >> "$batch_sql"
                 FLAGGED_PATHS+=("MISSING: ${relpath}")
                 continue
             fi
 
-            st=$(stat -c '%s %Y' "$abspath" 2>/dev/null) || continue
-            fsize="${st%% *}"; fmtime="${st##* }"
-
-            if [[ "$fsize" != "$rsize" || "$fmtime" != "$rmtime" ]]; then
-                # Legitimate change the reconcile hook should already have
-                # caught — refresh the record silently, no alert.
-                sum=$(integrity_sha256 "$abspath")
-                [[ -n "$sum" ]] || continue
-                echo "UPDATE files SET size=${fsize}, mtime=${fmtime}, checksum='${sum}', last_updated=${NOW}, last_checked=${NOW} WHERE id=${id};" >> "$batch_sql"
-                continue
-            fi
-
-            sum=$(integrity_sha256 "$abspath")
-            [[ -n "$sum" ]] || continue   # unreadable this instant — try again next cycle
-
-            if [[ "$sum" == "$rchecksum" ]]; then
-                echo "UPDATE files SET last_checked=${NOW} WHERE id=${id};" >> "$batch_sql"
-            else
-                echo "UPDATE files SET status='flagged', last_checked=${NOW} WHERE id=${id};" >> "$batch_sql"
-                echo "INSERT INTO events (ts, path, event_type, detail) VALUES (${NOW}, '${esc_path}', 'mismatch', 'expected ${rchecksum} got ${sum}');" >> "$batch_sql"
-                FLAGGED_PATHS+=("MISMATCH: ${relpath}")
+            chunk_ids+=("$id"); chunk_relpaths+=("$relpath")
+            chunk_rsizes+=("$rsize"); chunk_rmtimes+=("$rmtime"); chunk_rchecksums+=("$rchecksum")
+            chunk_abspaths+=("$abspath")
+            if (( ${#chunk_ids[@]} >= HASH_BATCH_SIZE )); then
+                _flush_resample_chunk
             fi
         done <<< "$resample_rows"
+        _flush_resample_chunk
+
         echo "COMMIT;" >> "$batch_sql"
         sqlite3 -bail -cmd ".timeout 30000" "$DB" < "$batch_sql"
     fi

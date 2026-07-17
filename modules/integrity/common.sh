@@ -110,6 +110,48 @@ integrity_sha256() {
     sha256sum "$1" 2>/dev/null | awk '{print $1}'
 }
 
+# integrity_batch_hash ABSPATH...
+# Stats and sha256-hashes many files via two subprocess calls total instead
+# of two forks per file (both `stat` and `sha256sum` accept any number of
+# file operands) — the dominant cost of a large discovery/resample pass is
+# forking, not the actual I/O, since rsync (a single compiled process) does
+# comparable I/O in a fraction of the time. Emits one
+# "size<TAB>mtime<TAB>sha256<TAB>abspath" line per input file that could be
+# both stat'd and hashed; a file that vanished or became unreadable between
+# being listed and this call is silently omitted (same as the fork-per-file
+# code this replaces, which skipped it via `|| continue`). Callers that need
+# to distinguish "never existed" from "vanished mid-batch" should check
+# `[[ -f "$abspath" ]]` per path first — that's a bash builtin test, not a
+# fork, so doing it per-file is free.
+integrity_batch_hash() {
+    [[ $# -gt 0 ]] || return 0
+
+    local stat_out sum_out
+    stat_out=$(stat -c '%s %Y %n' "$@" 2>/dev/null)
+    sum_out=$(sha256sum "$@" 2>/dev/null)
+
+    local -A _ibh_size=() _ibh_mtime=()
+    local line fsize fmtime rest
+    while IFS= read -r line; do
+        [[ -n "$line" ]] || continue
+        read -r fsize fmtime rest <<< "$line"
+        _ibh_size["$rest"]="$fsize"
+        _ibh_mtime["$rest"]="$fmtime"
+    done <<< "$stat_out"
+
+    local sum path
+    while IFS= read -r line; do
+        [[ -n "$line" ]] || continue
+        # GNU sha256sum's output is "<64-hex-hash>  <path>" (two spaces) —
+        # slicing by fixed width instead of word-splitting keeps this safe
+        # for paths containing spaces.
+        sum="${line:0:64}"
+        path="${line:66}"
+        [[ -n "${_ibh_size[$path]+x}" ]] || continue
+        printf '%s\t%s\t%s\t%s\n' "${_ibh_size[$path]}" "${_ibh_mtime[$path]}" "$sum" "$path"
+    done <<< "$sum_out"
+}
+
 # integrity_log_event DB EVENT_TYPE PATH [DETAIL]
 integrity_log_event() {
     local db="$1" event_type="$2" path="$3" detail="${4:-}"
