@@ -40,17 +40,30 @@ for i in $(seq 0 $((n - 1))); do
     nase_dir="${mountpoint%/}/.nase"
     db=$(integrity_db_path "$mountpoint")
 
+    is_ro=$(findmnt --target "$mountpoint" --output OPTIONS --noheadings --first-only \
+        | grep -qw ro && echo true || echo false)
+
     if [[ -f "$db" ]]; then
         log_info "  Drive '${name}': manifest already exists (${db})."
         # Re-assert permissions every run in case something (e.g. a manual
         # 'fix-ownership.sh' run predating its .nase exclusion) changed them.
         chown root:root "$nase_dir"
         chmod 0700 "$nase_dir"
+        # Retroactively migrate DBs created before WAL became the default
+        # (schema.sql's PRAGMA only applies at creation time) — a no-op once
+        # already on WAL. Needs a rw remount on backup drives, which are
+        # read-only at rest.
+        if [[ "$is_ro" == "true" ]]; then
+            mount -o remount,rw "$mountpoint" \
+                || { log_error "  Cannot remount ${mountpoint} rw — skipping WAL migration."; continue; }
+            sqlite3 "$db" "PRAGMA journal_mode=WAL;" >/dev/null
+            mount -o remount,ro "$mountpoint" \
+                || log_warn "  Failed to remount ${mountpoint} ro — drive left writable."
+        else
+            sqlite3 "$db" "PRAGMA journal_mode=WAL;" >/dev/null
+        fi
         continue
     fi
-
-    is_ro=$(findmnt --target "$mountpoint" --output OPTIONS --noheadings --first-only \
-        | grep -qw ro && echo true || echo false)
 
     _create_and_init() {
         mkdir -p "$nase_dir"
