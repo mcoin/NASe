@@ -187,7 +187,7 @@ _VALID_JOB_NAME = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 # ── Log helpers ────────────────────────────────────────────────────────────────
 def log_path(job: str | None) -> Path:
-    if job is not None and not _VALID_JOB_NAME.match(job):
+    if job and not _VALID_JOB_NAME.match(job):
         raise ValueError(f"Invalid job name: {job!r}")
     return Path(f"/var/log/nase-sync-{job}.log") if job else CENTRAL_LOG
 
