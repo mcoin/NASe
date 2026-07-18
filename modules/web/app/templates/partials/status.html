@@ -98,12 +98,14 @@
                 <span class="badge badge-warn">{{ t.state }}</span>
               {% endif %}
             </td>
-            <td class="muted" data-label="Next Trigger">{{ t.next }}</td>
-            <td class="muted" data-label="Last Sync">
+            <td class="muted mono" data-label="Next Trigger">
+              <span>{{ t.next }}{% if t.next_in %} &nbsp;<em>({{ t.next_in }})</em>{% endif %}</span>
+            </td>
+            <td class="muted mono" data-label="Last Sync">
               {% if t.last == "never" %}
-                never
+                <span>never</span>
               {% else %}
-                {{ t.last }}{% if t.ago %} &nbsp;<em>({{ t.ago }})</em>{% endif %}
+                <span>{{ t.last }}{% if t.ago %} &nbsp;<em>({{ t.ago }})</em>{% endif %}</span>
               {% endif %}
             </td>
           </tr>

@@ -76,14 +76,30 @@ def _run(*cmd: str) -> subprocess.CompletedProcess:
 def unit_active(unit: str) -> str:
     return _run("systemctl", "is-active", unit).stdout.strip() or "unknown"
 
-def unit_next(unit: str) -> str:
+def _relative_duration(seconds: int) -> str:
+    """'90' -> '1min', '7300' -> '2h', etc. — shared by past ("X ago") and
+    future ("in X") relative-time labels so both use the same thresholds."""
+    if   seconds < 60:    return f"{seconds}s"
+    elif seconds < 3600:  return f"{seconds // 60}min"
+    elif seconds < 86400: return f"{seconds // 3600}h"
+    else:                 return f"{seconds // 86400}d"
+
+def unit_next(unit: str) -> tuple[str, str | None]:
     r = _run("systemctl", "show", unit,
              "--property=NextElapseUSecRealtime", "--value")
     val = r.stdout.strip()
     if not val or val in ("0", "n/a"):
-        return "—"
-    r2 = _run("date", "-d", val, "+%Y-%m-%d %H:%M:%S")
-    return r2.stdout.strip() or "—"
+        return "—", None
+    r2 = _run("date", "-d", val, "+%Y-%m-%d %H:%M:%S %s")
+    out = r2.stdout.strip()
+    if not out:
+        return "—", None
+    dt, _, epoch_str = out.rpartition(" ")
+    try:
+        diff = int(epoch_str) - int(datetime.now().timestamp())
+    except ValueError:
+        return dt or "—", None
+    return dt, f"in {_relative_duration(diff)}" if diff > 0 else None
 
 # ── Drive info ─────────────────────────────────────────────────────────────────
 def drive_info(drive: dict) -> dict:
@@ -116,11 +132,7 @@ def stamp_info(job_name: str, *, stamp_file: Path | None = None) -> tuple[str, s
     mtime = stamp.stat().st_mtime
     dt    = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M:%S")
     diff  = int(datetime.now().timestamp() - mtime)
-    if   diff < 60:    ago = f"{diff}s ago"
-    elif diff < 3600:  ago = f"{diff // 60}min ago"
-    elif diff < 86400: ago = f"{diff // 3600}h ago"
-    else:              ago = f"{diff // 86400}d ago"
-    return dt, ago
+    return dt, f"{_relative_duration(diff)} ago"
 
 # ── Status builder ─────────────────────────────────────────────────────────────
 def build_status(cfg: dict) -> dict:
@@ -129,7 +141,7 @@ def build_status(cfg: dict) -> dict:
         "name":         "nase-monitor",
         "state":        unit_active("nase-monitor.timer"),
         "detail_label": "next",
-        "detail":       unit_next("nase-monitor.timer"),
+        "detail":       unit_next("nase-monitor.timer")[0],
     })
     fb = cfg.get("services", {}).get("filebrowser", {})
     if fb.get("enabled"):
@@ -160,12 +172,14 @@ def build_status(cfg: dict) -> dict:
         state = unit_active(unit)
         last, ago = stamp_info("config-archive",
                                stamp_file=STAMP_DIR / "config-archive.stamp")
+        next_dt, next_in = unit_next(unit) if state == "active" else ("—", None)
         timers.append({
-            "name":  "config-archive",
-            "state": state,
-            "next":  unit_next(unit) if state == "active" else "—",
-            "last":  last,
-            "ago":   ago,
+            "name":    "config-archive",
+            "state":   state,
+            "next":    next_dt,
+            "next_in": next_in,
+            "last":    last,
+            "ago":     ago,
         })
 
     for job in cfg.get("sync_jobs", []):
@@ -173,12 +187,14 @@ def build_status(cfg: dict) -> dict:
         unit      = f"nase-sync-{name}.timer"
         state     = unit_active(unit)
         last, ago = stamp_info(name)
+        next_dt, next_in = unit_next(unit) if state == "active" else ("—", None)
         timers.append({
-            "name":  name,
-            "state": state,
-            "next":  unit_next(unit) if state == "active" else "—",
-            "last":  last,
-            "ago":   ago,
+            "name":    name,
+            "state":   state,
+            "next":    next_dt,
+            "next_in": next_in,
+            "last":    last,
+            "ago":     ago,
         })
 
     return {"services": services, "drives": drives, "timers": timers}
