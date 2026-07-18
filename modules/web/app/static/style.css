@@ -90,42 +90,56 @@ main {
   .status-grid { grid-template-columns: 1fr; }
 }
 
+/* A narrow phone in landscape (e.g. 852x393 on an iPhone 15) is well past
+   the 640px width breakpoint above, but too short to comfortably fit
+   Services and Drives side by side — stack them there too. Tables keep
+   their normal column layout at this width; only the two-card grid changes. */
+@media (orientation: landscape) and (max-height: 500px) {
+  .status-grid { grid-template-columns: 1fr; }
+}
+
 /* ── Responsive tables (stacked cards below 640px) ────────────────────────── */
 /* Opt-in via .responsive-table — turns each row into a bordered card with
-   label:value pairs stacked vertically (label from data-label), so every
+   "label: value" pairs on one line each (label from data-label), so every
    column stays visible on a phone instead of being pushed off-screen or
-   requiring a sideways swipe to discover. */
+   requiring a sideways swipe to discover, without the extra vertical space
+   a label-above-value layout would cost. */
 @media (max-width: 640px) {
   .responsive-table thead { display: none; }
 
-  .responsive-table, .responsive-table tbody, .responsive-table tr {
+  .responsive-table, .responsive-table tbody {
     display: block;
     width: 100%;
   }
 
   .responsive-table tr {
+    display: block;
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    padding: 0.6rem 0.75rem;
-    margin: 0.6rem 1rem;
+    padding: 0.5rem 0.75rem;
+    margin: 0.5rem 1rem;
   }
 
   .responsive-table td {
     display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 0.15rem;
-    padding: 0.3rem 0;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    padding: 0.15rem 0;
     border-bottom: none;
   }
 
   .responsive-table td::before {
-    content: attr(data-label);
-    font-size: 0.65rem;
+    content: attr(data-label) ":";
+    font-size: 0.72rem;
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
     color: var(--muted);
+    flex-shrink: 0;
+    /* Fixed width (long enough for "Next Trigger:") so values start at the
+       same x position across every field in a card — otherwise "Next
+       Trigger" and "Last Sync" (different label lengths) leave their
+       timestamps unaligned with each other despite both using a mono font. */
+    min-width: 6.5rem;
   }
 }
 
