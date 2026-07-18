@@ -26,6 +26,13 @@
 # transaction is active" crash in production. Chaining capped passes keeps
 # every pass's cost (and lock hold time) the same as a manual limited run.
 #
+# Backup drives are read-only at rest (see CLAUDE.md); the nightly
+# piggybacked pass never hits this because sync.sh has already remounted
+# the drive rw for the whole job by the time it calls discover_and_sample.sh
+# — but a standalone bootstrap run has no such wrapper, so without handling
+# it here every write (even just creating the .nase/tmp scratch dir) fails
+# with "attempt to write a readonly database".
+#
 # Usage: bootstrap.sh <mountpoint> [limit]
 set -euo pipefail
 
@@ -45,10 +52,23 @@ if ! config_bool '.integrity.enabled' 2>/dev/null; then
     exit 0
 fi
 
+if findmnt --target "$MOUNTPOINT" --output OPTIONS --noheadings --first-only 2>/dev/null | grep -qw ro; then
+    log_info "Integrity bootstrap: ${MOUNTPOINT} is mounted read-only — remounting rw for the duration."
+    mount -o remount,rw "$MOUNTPOINT" \
+        || { log_error "Cannot remount ${MOUNTPOINT} rw — aborting."; exit 1; }
+    # A trap (not just a remount-back at the bottom of this file) so the
+    # drive is never left rw if a pass errors out or the user Ctrl-Cs a
+    # long-running chained bootstrap.
+    trap 'log_info "Remounting ${MOUNTPOINT} read-only..."; mount -o remount,ro "${MOUNTPOINT}" || log_warn "Failed to remount ${MOUNTPOINT} ro — drive left writable."' EXIT
+fi
+
 if [[ -n "$LIMIT" ]]; then
     log_warn "This hashes up to ${LIMIT} undiscovered file(s) on ${MOUNTPOINT} at full speed, then stops."
     log_warn "Safe to re-run (e.g. once a day) — it resumes where it left off until discovery completes."
-    exec "${REPO_ROOT}/modules/integrity/discover_and_sample.sh" "$MOUNTPOINT" --uncapped "$LIMIT"
+    # A plain call, not exec — exec would replace this process before the
+    # EXIT trap above ever gets to remount the drive back to read-only.
+    "${REPO_ROOT}/modules/integrity/discover_and_sample.sh" "$MOUNTPOINT" --uncapped "$LIMIT"
+    exit 0
 fi
 
 # Fixed pass size for the no-limit case — matches the size that's already
