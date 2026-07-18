@@ -107,6 +107,12 @@ if [[ -f "$EVENTS_LOG" ]]; then
         BEGIN { FS = "\t" }
         $1 >= since {
             ts = $1; op = $2; path = $3
+            # .nase/ (the integrity manifest) and .trash/ are internal
+            # churn, not user activity — record.sh and reconcile-primary.sh
+            # already exclude them at the source, but old log entries can
+            # predate that fix (or the watch service predates a restart),
+            # so filter here too rather than ever surface them in a report.
+            if (path ~ /\/\.(nase|trash)(\/|$)/) next
             cnt[path]++
             if (!(path in lts) || ts > lts[path]) {
                 lts[path] = ts
@@ -145,6 +151,66 @@ if [[ $total_ops -gt 0 ]]; then
         [[ "$count" -gt 1 ]] && count_str=" (×${count})"
         ops_section+="    ${ts:0:16}  ${op}${count_str}   ${fname}\n"
     done <<< "$ops_tsv"
+fi
+
+# ── Integrity manifest status ─────────────────────────────────────────────────
+# Per-drive checksum manifest summary: discovery progress and any
+# mismatch/missing events recorded since the last report, plus the current
+# list of flagged files. This is what actually matters about the .nase
+# manifest for a human reading the report — its own internal file churn
+# (covered by the .nase exclude above) is not.
+integrity_section=""
+if config_bool '.integrity.enabled' 2>/dev/null; then
+    source "${REPO_ROOT}/modules/integrity/common.sh"
+    n_drives_i=$(config_len '.drives')
+    for i in $(seq 0 $((n_drives_i - 1))); do
+        iname=$(config_idx '.drives' "$i" '.name')
+        imp=$(config_idx   '.drives' "$i" '.mountpoint')
+        iactive=$(config_idx '.drives' "$i" '.active')
+        [[ "$iactive" != "false" ]] || continue
+        idb=$(integrity_db_path "$imp")
+        if [[ ! -f "$idb" ]]; then
+            integrity_section+="\n  ${iname} (${imp}): no manifest yet\n"
+            continue
+        fi
+
+        itotal=$(integrity_row_count "$idb")
+        iok=$(integrity_row_count "$idb" "ok")
+        iflagged=$(integrity_row_count "$idb" "flagged")
+        icomplete=$(integrity_meta_get "$idb" "discovery_complete")
+        icursor=$(integrity_meta_get "$idb" "discovery_cursor_n"); icursor="${icursor:-0}"
+        idtotal=$(integrity_meta_get "$idb" "discovery_total"); idtotal="${idtotal:-0}"
+
+        integrity_section+="\n  ${iname} (${imp})\n"
+        integrity_section+="    files: ${itotal}   ok: ${iok}   flagged: ${iflagged}\n"
+        if [[ "$icomplete" == "true" ]]; then
+            integrity_section+="    discovery: complete\n"
+        else
+            integrity_section+="    discovery: in progress (${icursor}/${idtotal})\n"
+        fi
+
+        ievents=$(sqlite3 -separator $'\t' "$idb" \
+            "SELECT ts, event_type, path, detail FROM events WHERE ts >= ${since_ts} ORDER BY ts;" 2>/dev/null || true)
+        if [[ -n "$ievents" ]]; then
+            integrity_section+="    checks since last report:\n"
+            while IFS=$'\t' read -r ets etype epath edetail; do
+                [[ -n "$ets" ]] || continue
+                edt=$(date -d "@${ets}" '+%Y-%m-%d %H:%M')
+                integrity_section+="      ${edt}  ${etype}   ${epath}${edetail:+ (${edetail})}\n"
+            done <<< "$ievents"
+        else
+            integrity_section+="    checks since last report: no mismatches or missing files\n"
+        fi
+
+        if [[ "$iflagged" -gt 0 ]]; then
+            anomalies+=("${iflagged} flagged file(s) on drive '${iname}' — see integrity status below")
+            integrity_section+="    flagged files (ack with: sudo nase integrity ack ${iname} <path>):\n"
+            while IFS= read -r ifp; do
+                [[ -n "$ifp" ]] || continue
+                integrity_section+="      ${ifp}\n"
+            done < <(sqlite3 "$idb" "SELECT path FROM files WHERE status='flagged' ORDER BY path LIMIT 50;" 2>/dev/null)
+        fi
+    done
 fi
 
 # ── Compose report body ───────────────────────────────────────────────────────
@@ -186,6 +252,16 @@ if [[ $total_ops -eq 0 ]]; then
 else
     body+="  ${total_ops} file(s) changed since ${since_disp}.\n"
     body+="${ops_section}\n"
+fi
+body+="\n"
+body+="\n=== INTEGRITY STATUS ===\n"
+body+="\n"
+if ! config_bool '.integrity.enabled' 2>/dev/null; then
+    body+="  Integrity manifest disabled (integrity.enabled: false in config.yaml).\n"
+elif [[ -z "$integrity_section" ]]; then
+    body+="  No active drives configured.\n"
+else
+    body+="${integrity_section}"
 fi
 body+="\n"
 body+="──────────────────────────────────────────────────────────────────────\n"
