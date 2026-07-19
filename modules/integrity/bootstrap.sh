@@ -84,6 +84,7 @@ DB=$(integrity_db_path "$MOUNTPOINT")
 
 while true; do
     cursor_before=$(integrity_meta_get "$DB" "discovery_cursor_n"); cursor_before="${cursor_before:-0}"
+    count_before=$(integrity_row_count "$DB")
 
     "${REPO_ROOT}/modules/integrity/discover_and_sample.sh" "$MOUNTPOINT" --uncapped "$CHUNK_SIZE"
 
@@ -93,9 +94,15 @@ while true; do
     # Guard against spinning forever with no error and no progress — e.g. a
     # UUID mismatch (integrity_check_uuid) or the drive going unmounted mid-
     # bootstrap both make discover_and_sample.sh a silent no-op (exit 0)
-    # every pass, which would otherwise loop here indefinitely.
+    # every pass, which would otherwise loop here indefinitely. Progress
+    # means either the cursor moved OR files got hashed this pass — a scan
+    # window with more undiscovered files than one pass's budget freezes the
+    # cursor on purpose (see discover_and_sample.sh's window_fully_covered)
+    # while still hashing CHUNK_SIZE files per pass, so cursor-only checks
+    # would wrongly abort on the very first pass into such a window.
     cursor_after=$(integrity_meta_get "$DB" "discovery_cursor_n"); cursor_after="${cursor_after:-0}"
-    if [[ "$cursor_after" == "$cursor_before" ]]; then
+    count_after=$(integrity_row_count "$DB")
+    if [[ "$cursor_after" == "$cursor_before" && "$count_after" == "$count_before" ]]; then
         log_error "Integrity: ${MOUNTPOINT} made no discovery progress this pass — stopping instead of looping forever."
         log_error "Check 'sudo nase integrity status ${MOUNTPOINT##*/}' and the drive's mount/UUID state."
         exit 1
