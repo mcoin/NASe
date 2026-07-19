@@ -38,11 +38,32 @@
 
 {% block scripts %}
 <script>
-  document.body.addEventListener("htmx:afterSwap", function (e) {
-    if (e.detail.target.id === "log-content") {
-      e.detail.target.scrollTop = e.detail.target.scrollHeight;
+  // Auto-scroll to the newest log line on refresh, but only when the user
+  // was already at (or near) the bottom before the refresh — otherwise a
+  // reader scrolled up to review older lines gets yanked back down every
+  // poll. Switching jobs always snaps to bottom since it's a fresh log.
+  var logStickToBottom = true;
+
+  document.getElementById("log-form").addEventListener("change", function () {
+    logStickToBottom = true;
+  });
+
+  document.body.addEventListener("htmx:beforeSwap", function (e) {
+    if (e.detail.target.id !== "log-content") return;
+    if (!logStickToBottom) {
+      var el = e.detail.target;
+      logStickToBottom = (el.scrollTop + el.clientHeight >= el.scrollHeight - 20);
     }
   });
+
+  document.body.addEventListener("htmx:afterSwap", function (e) {
+    if (e.detail.target.id !== "log-content") return;
+    if (logStickToBottom) {
+      e.detail.target.scrollTop = e.detail.target.scrollHeight;
+    }
+    logStickToBottom = false;
+  });
+
   window.addEventListener("load", function () {
     var p = document.getElementById("log-content");
     if (p) p.scrollTop = p.scrollHeight;
