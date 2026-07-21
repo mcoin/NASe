@@ -214,16 +214,40 @@ cmd_resume() {
 
 # ── drives ────────────────────────────────────────────────────────────────────
 
+# "active 1737463000 confirmed" -> "spinning (2h)"; "standby ... estimated" -> "standby (~2h)"
+_spin_label() {
+    local name="$1"
+    local out state since confidence now diff dur prefix=""
+    out=$("${REPO_ROOT}/modules/drives/spin_status.sh" "$name" 2>/dev/null || true)
+    read -r state since confidence <<<"$out"
+    [[ "$state" == "active" || "$state" == "standby" ]] || { echo "—"; return; }
+
+    now=$(date +%s)
+    diff=$(( now - since ))
+    if   [[ $diff -lt 60 ]];    then dur="${diff}s"
+    elif [[ $diff -lt 3600 ]];  then dur="$(( diff / 60 ))min"
+    elif [[ $diff -lt 86400 ]]; then dur="$(( diff / 3600 ))h"
+    else                             dur="$(( diff / 86400 ))d"
+    fi
+    [[ "$confidence" == "estimated" ]] && prefix="~"
+
+    if [[ "$state" == "active" ]]; then
+        echo "${_C_GREEN}spinning${_C_RST} (${prefix}${dur})"
+    else
+        echo "${_C_YELLOW}standby${_C_RST} (${prefix}${dur})"
+    fi
+}
+
 # Shared table renderer; pass an indent string (e.g. "  ") or empty.
 _drives_table() {
     local indent="${1:-}"
     local n
     n=$(config_len '.drives')
 
-    printf "%s%-12s %-20s %-10s %-5s %s\n" \
-        "$indent" "NAME" "MOUNTPOINT" "STATUS" "MODE" "USAGE"
+    printf "%s%-12s %-20s %-10s %-5s %-20s %s\n" \
+        "$indent" "NAME" "MOUNTPOINT" "STATUS" "MODE" "USAGE" "SPIN"
     printf "%s%s\n" "$indent" \
-        "──────────────────────────────────────────────────────────────────"
+        "────────────────────────────────────────────────────────────────────────────────"
 
     for i in $(seq 0 $((n - 1))); do
         local name mp active
@@ -237,9 +261,12 @@ _drives_table() {
             continue
         fi
 
+        local spin
+        spin=$(_spin_label "$name")
+
         if ! findmnt --target "$mp" --noheadings &>/dev/null; then
-            printf "%s%-12s %-20s ${_C_RED}%-10s${_C_RST}\n" \
-                "$indent" "$name" "$mp" "not mounted"
+            printf "%s%-12s %-20s ${_C_RED}%-10s${_C_RST} %-5s %-20s %s\n" \
+                "$indent" "$name" "$mp" "not mounted" "" "" "$spin"
             continue
         fi
 
@@ -250,8 +277,8 @@ _drives_table() {
         usage=$(df -h "$mp" 2>/dev/null \
             | awk 'NR==2 {print $3 " / " $2 " (" $5 ")"}' || echo "—")
 
-        printf "%s%-12s %-20s ${_C_GREEN}%-10s${_C_RST} %-5s %s\n" \
-            "$indent" "$name" "$mp" "mounted" "$mode" "$usage"
+        printf "%s%-12s %-20s ${_C_GREEN}%-10s${_C_RST} %-5s %-20s %s\n" \
+            "$indent" "$name" "$mp" "mounted" "$mode" "$usage" "$spin"
     done
 }
 

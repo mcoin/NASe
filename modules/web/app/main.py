@@ -124,6 +124,24 @@ def drive_info(drive: dict) -> dict:
                 usage = f"{parts[2]} / {parts[1]} ({parts[4]})"
     return {"status": "mounted", "mode": mode, "usage": usage}
 
+# ── Spin state ─────────────────────────────────────────────────────────────────
+SPIN_STATUS_SCRIPT = REPO_ROOT / "modules" / "drives" / "spin_status.sh"
+
+def drive_spin_info(name: str, active: bool) -> dict:
+    if not active:
+        return {"spin_state": None, "spin_duration": None, "spin_estimated": False}
+    r = _run(str(SPIN_STATUS_SCRIPT), name)
+    parts = r.stdout.split()
+    if len(parts) != 3 or parts[0] == "unknown":
+        return {"spin_state": None, "spin_duration": None, "spin_estimated": False}
+    state, since, confidence = parts
+    diff = int(datetime.now().timestamp()) - int(since)
+    return {
+        "spin_state": state,
+        "spin_duration": _relative_duration(max(diff, 0)),
+        "spin_estimated": confidence == "estimated",
+    }
+
 # ── Stamp info ─────────────────────────────────────────────────────────────────
 def stamp_info(job_name: str, *, stamp_file: Path | None = None) -> tuple[str, str | None]:
     stamp = stamp_file if stamp_file is not None else STAMP_DIR / f"sync-{job_name}.stamp"
@@ -162,7 +180,10 @@ def build_status(cfg: dict) -> dict:
             "detail":       "",
         })
 
-    drives = [{**d, **drive_info(d)} for d in cfg.get("drives", [])]
+    drives = [
+        {**d, **drive_info(d), **drive_spin_info(d["name"], d.get("active") is not False)}
+        for d in cfg.get("drives", [])
+    ]
 
     timers = []
 

@@ -47,6 +47,7 @@
             <th>Status</th>
             <th>Mode</th>
             <th>Usage</th>
+            <th>Spin</th>
           </tr>
         </thead>
         <tbody>
@@ -65,6 +66,18 @@
             </td>
             <td class="muted" data-label="Mode">{{ d.mode or "—" }}</td>
             <td class="muted" data-label="Usage">{{ d.usage or "—" }}</td>
+            <td class="muted" data-label="Spin">
+              {% if d.spin_state == "active" %}
+                <span class="badge badge-ok">spinning</span>
+              {% elif d.spin_state == "standby" %}
+                <span class="badge badge-warn">standby</span>
+              {% else %}
+                <span>—</span>
+              {% endif %}
+              {% if d.spin_duration %}
+                &nbsp;<em>(for {% if d.spin_estimated %}~{% endif %}{{ d.spin_duration }})</em>
+              {% endif %}
+            </td>
           </tr>
           {% endfor %}
         </tbody>
