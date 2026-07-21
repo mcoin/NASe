@@ -336,9 +336,15 @@ def drive_integrity_info(name: str, mountpoint: str) -> dict:
     if not mountpoint or not db.exists():
         return {"name": name, "mountpoint": mountpoint, "has_manifest": False}
 
-    total_n   = (_integrity_query(db, "SELECT COUNT(*) FROM files") or [(0,)])[0][0]
+    # status is NOT NULL and CHECK-constrained to 'ok'/'flagged' (schema.sql),
+    # so total is just their sum — no need for a separate, unfiltered
+    # COUNT(*) that (unlike these two) can't use idx_files_sample(status,
+    # last_checked) as a search and has to scan every row instead. On a
+    # multi-million-row table on a slow external drive that scan alone took
+    # 40-90s versus under a second for each of these.
     ok_n      = (_integrity_query(db, "SELECT COUNT(*) FROM files WHERE status='ok'") or [(0,)])[0][0]
     flagged_n = (_integrity_query(db, "SELECT COUNT(*) FROM files WHERE status='flagged'") or [(0,)])[0][0]
+    total_n   = ok_n + flagged_n
 
     discovery_complete = _integrity_meta(db, "discovery_complete") == "true"
     discovery_pct = None
