@@ -44,6 +44,8 @@ n=$(config_len '.drives')
     echo ""
 } > "$UDEV_RULES_FILE"
 
+max_spindown_min=0
+
 for i in $(seq 0 $((n - 1))); do
     name=$(config_idx '.drives' "$i" '.name')
     active=$(config_idx '.drives' "$i" '.active')
@@ -55,6 +57,10 @@ for i in $(seq 0 $((n - 1))); do
 
     uuid=$(config_idx '.drives' "$i" '.uuid')
     spindown_min=$(config_idx '.drives' "$i" '.spindown_min')
+
+    if [[ "$spindown_min" -gt "$max_spindown_min" ]]; then
+        max_spindown_min="$spindown_min"
+    fi
 
     hdparm_val=$(spindown_min_to_hdparm "$spindown_min")
 
@@ -87,3 +93,46 @@ done
 
 udevadm control --reload-rules
 log_ok "Spindown rules written to ${UDEV_RULES_FILE}"
+
+# ── Keep smartd's poll interval longer than any drive's spindown timer ──────
+# smartmontools' smartd runs DEVICESCAN on a fixed interval (30 min by
+# default) regardless of NASe's own per-drive smart_check setting. If that
+# interval is shorter than a drive's hdparm spindown_min, smartd's periodic
+# SMART read resets the drive's idle timer before it ever accumulates enough
+# quiet time to spin down — the drive then never reaches standby, so
+# smartd's own "-n standby" skip-if-asleep logic never kicks in either, and
+# the drive spins forever. Keep smartd's interval comfortably above the
+# longest configured spindown_min so every drive gets an idle window.
+SMARTD_DEFAULTS="/etc/default/smartmontools"
+SMARTD_MARKER_BEGIN="# --- Managed by NASe (spindown.sh): begin ---"
+SMARTD_MARKER_END="# --- Managed by NASe (spindown.sh): end ---"
+
+strip_smartd_block() {
+    sed -i "/^${SMARTD_MARKER_BEGIN//\//\\/}$/,/^${SMARTD_MARKER_END//\//\\/}$/d" "$SMARTD_DEFAULTS"
+}
+
+if [[ -f "$SMARTD_DEFAULTS" ]]; then
+    before_hash=$(md5sum "$SMARTD_DEFAULTS" | cut -d' ' -f1)
+
+    grep -qF "$SMARTD_MARKER_BEGIN" "$SMARTD_DEFAULTS" && strip_smartd_block
+
+    if [[ "$max_spindown_min" -gt 0 ]]; then
+        smartd_interval_sec=$(( (max_spindown_min + 30) * 60 ))
+        {
+            echo "$SMARTD_MARKER_BEGIN"
+            echo "# Interval kept above every configured drive spindown_min (longest: ${max_spindown_min}min)"
+            echo "# so periodic SMART polling doesn't block spindown. See modules/drives/spindown.sh."
+            echo "smartd_opts=\"--interval=${smartd_interval_sec}\""
+            echo "$SMARTD_MARKER_END"
+        } >> "$SMARTD_DEFAULTS"
+    fi
+    # else: no drive has spindown enabled — leave the block stripped so
+    # smartd falls back to its own default interval.
+
+    after_hash=$(md5sum "$SMARTD_DEFAULTS" | cut -d' ' -f1)
+
+    if [[ "$before_hash" != "$after_hash" ]] && systemctl list-unit-files smartmontools.service &>/dev/null; then
+        log_info "smartd config changed — restarting smartmontools.service (interval ${smartd_interval_sec:-default}s)"
+        systemctl restart smartmontools.service || log_warn "  Could not restart smartmontools.service"
+    fi
+fi
