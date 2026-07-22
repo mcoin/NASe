@@ -71,10 +71,15 @@ for i in $(seq 0 $((n - 1))); do
         log_info "Drive '${name}': spindown after ${spindown_min} min (hdparm -S ${hdparm_val})"
         # The rule matches the disk device (not partition) by UUID of any partition on it.
         # DEVTYPE==disk matches the whole disk; we use the UUID of the first partition.
+        # Also force APM (-B) to a spin-down-permitting level: hdparm docs say
+        # 128-254 (many drives' factory default, e.g. 254) *does not permit
+        # spin-down* at the drive firmware level, silently overriding -S no
+        # matter what timer value it's set to. 127 is the least aggressive
+        # value that still permits spin-down, so it doesn't fight normal I/O.
         cat >> "$UDEV_RULES_FILE" <<EOF
 # Drive: ${name} — spindown after ${spindown_min} min
 ACTION=="add|change", SUBSYSTEM=="block", ENV{ID_FS_UUID}=="${uuid}", \\
-  RUN+="/usr/bin/hdparm -S ${hdparm_val} /dev/%k"
+  RUN+="/usr/bin/hdparm -B 127 -S ${hdparm_val} /dev/%k"
 EOF
     fi
 
@@ -82,11 +87,11 @@ EOF
     dev_symlink="/dev/disk/by-uuid/${uuid}"
     if [[ -e "$dev_symlink" ]]; then
         dev=$(readlink -f "$dev_symlink")
-        # hdparm -S applies to the whole disk, not a partition
+        # hdparm -S/-B apply to the whole disk, not a partition
         disk=$(lsblk -no pkname "$dev" 2>/dev/null || true)
         if [[ -n "$disk" ]]; then
-            log_info "  Applying hdparm -S ${hdparm_val} to /dev/${disk}"
-            hdparm -S "$hdparm_val" "/dev/${disk}" &>/dev/null || log_warn "  hdparm failed for /dev/${disk}"
+            log_info "  Applying hdparm -B 127 -S ${hdparm_val} to /dev/${disk}"
+            hdparm -B 127 -S "$hdparm_val" "/dev/${disk}" &>/dev/null || log_warn "  hdparm failed for /dev/${disk}"
         fi
     fi
 done
