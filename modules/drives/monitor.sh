@@ -33,6 +33,17 @@ for i in $(seq 0 $((n - 1))); do
     disk_path="${disk:+/dev/${disk}}"
     [[ -z "$disk_path" ]] && disk_path="$dev"
 
+    # Skip the check entirely if the drive looks spun down — smartctl -H
+    # would otherwise wake it just to answer. spin_status.sh already knows
+    # how to tell (hdparm -C where supported, an I/O-activity heuristic
+    # where the bridge doesn't implement CHECK POWER MODE).
+    spin_info=$("${REPO_ROOT}/modules/drives/spin_status.sh" "$name")
+    spin_state=$(awk '{print $1}' <<< "$spin_info")
+    if [[ "$spin_state" == "standby" ]]; then
+        log_info "  '${name}': in standby — skipping SMART check to avoid waking it."
+        continue
+    fi
+
     log_info "Checking SMART health of '${name}' (${disk_path})..."
     # -H: print overall health assessment
     # -A: print drive attributes

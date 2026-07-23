@@ -141,3 +141,89 @@ if [[ -f "$SMARTD_DEFAULTS" ]]; then
         systemctl restart smartmontools.service || log_warn "  Could not restart smartmontools.service"
     fi
 fi
+
+# ── Build smartd's device list, excluding drives it can't safely poll ──────
+# smartd's stock config scans every ATA/SCSI device via DEVICESCAN and
+# applies "-n standby" (skip a check while genuinely asleep) uniformly. Some
+# USB/UAS enclosures don't implement the ATA CHECK POWER MODE command at all
+# (seen on this box's primary drive) — for those, "-n standby" silently
+# becomes a no-op, so smartd unconditionally polls, and thus wakes, the
+# drive every interval no matter how long it's been idle. DEVICESCAN can't
+# be combined with per-device overrides (per its own doc comment, any lines
+# after it are ignored), so once one drive needs to be excluded, the whole
+# device list has to be taken over explicitly.
+#
+# Drives that can't be power-mode-queried are left out of smartd entirely —
+# nase-monitor.timer's own check (modules/drives/monitor.sh) covers those
+# instead, via spin_status.sh's I/O-activity heuristic, which doesn't need
+# CHECK POWER MODE support.
+SMARTD_CONF="/etc/smartd.conf"
+SMARTD_CONF_MARKER_BEGIN="# --- Managed by NASe (spindown.sh): begin device list ---"
+SMARTD_CONF_MARKER_END="# --- Managed by NASe (spindown.sh): end device list ---"
+
+if [[ -f "$SMARTD_CONF" ]]; then
+    conf_before_hash=$(md5sum "$SMARTD_CONF" | cut -d' ' -f1)
+
+    sed -i "/^${SMARTD_CONF_MARKER_BEGIN//\//\\/}$/,/^${SMARTD_CONF_MARKER_END//\//\\/}$/d" "$SMARTD_CONF"
+    sed -i '/^DEVICESCAN\b/d' "$SMARTD_CONF"
+
+    # Decide per-drive inclusion (and log it) before writing anything —
+    # log_info writes to stdout, so it must not run inside the redirected
+    # block below or its output would land in the conf file itself.
+    smartd_conf_lines=()
+    for i in $(seq 0 $((n - 1))); do
+        name=$(config_idx '.drives' "$i" '.name')
+        active=$(config_idx '.drives' "$i" '.active')
+        [[ "$active" == "false" ]] && continue
+        smart_check=$(config_idx '.drives' "$i" '.smart_check')
+        [[ "$smart_check" == "true" ]] || continue
+
+        uuid=$(config_idx '.drives' "$i" '.uuid')
+        dev_symlink="/dev/disk/by-uuid/${uuid}"
+
+        power_mode_ok="unknown"
+        smartd_dev=""
+        if [[ -e "$dev_symlink" ]]; then
+            # by-uuid resolves to the filesystem's partition (e.g. sdb1); SMART
+            # commands (and the CHECK POWER MODE probe below) need the whole
+            # disk. Prefer a by-id symlink for stability across reboots,
+            # falling back to the raw /dev/sdX name if none exists.
+            dev=$(readlink -f "$dev_symlink")
+            disk=$(lsblk -no pkname "$dev" 2>/dev/null || true)
+            if [[ -n "$disk" ]]; then
+                smartd_dev=$(find /dev/disk/by-id -maxdepth 1 -lname "*/${disk}" 2>/dev/null | sort | head -1)
+                [[ -z "$smartd_dev" ]] && smartd_dev="/dev/${disk}"
+
+                hdparm_out=$(hdparm -C "$smartd_dev" 2>/dev/null || true)
+                if echo "$hdparm_out" | grep -qE "standby|sleeping|active|idle"; then
+                    power_mode_ok="yes"
+                else
+                    power_mode_ok="no"
+                fi
+            fi
+        fi
+
+        if [[ "$power_mode_ok" == "no" ]]; then
+            log_info "smartd: '${name}' — CHECK POWER MODE unsupported over this bridge, excluding from smartd (nase-monitor.timer covers it instead)"
+            smartd_conf_lines+=("# Drive '${name}': excluded — CHECK POWER MODE unsupported; monitored by nase-monitor.timer instead")
+        elif [[ -n "$smartd_dev" ]]; then
+            smartd_conf_lines+=("${smartd_dev} -d removable -n standby -m root -M exec /usr/share/smartmontools/smartd-runner")
+        else
+            smartd_conf_lines+=("# Drive '${name}': not present — will be picked up on next apply once connected")
+        fi
+    done
+
+    {
+        echo "$SMARTD_CONF_MARKER_BEGIN"
+        echo "# Explicit per-device list — replaces DEVICESCAN so drives with a"
+        echo "# broken CHECK POWER MODE can be excluded. See modules/drives/spindown.sh."
+        printf '%s\n' "${smartd_conf_lines[@]}"
+        echo "$SMARTD_CONF_MARKER_END"
+    } >> "$SMARTD_CONF"
+
+    conf_after_hash=$(md5sum "$SMARTD_CONF" | cut -d' ' -f1)
+    if [[ "$conf_before_hash" != "$conf_after_hash" ]] && systemctl list-unit-files smartmontools.service &>/dev/null; then
+        log_info "smartd device list changed — restarting smartmontools.service"
+        systemctl restart smartmontools.service || log_warn "  Could not restart smartmontools.service"
+    fi
+fi
