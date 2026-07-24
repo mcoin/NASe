@@ -79,10 +79,21 @@ log_ok "All SMART checks passed."
 # /mnt/primary. Warn well before the directory count catches up with
 # fs.inotify.max_user_watches, since once it's exceeded the recorder starts
 # failing silently and the web UI's Changes view goes blank.
+#
+# This walks every directory under /mnt/primary, which is real disk I/O on a
+# tree this large — skip it while primary looks spun down, same as the SMART
+# check above, otherwise this scan alone both wakes the drive and feeds
+# spin_status.sh's heuristic a fresh "activity" timestamp, undoing the idle
+# window it just spent an hour building up.
 WATCH_ROOT="/mnt/primary"
 WATCH_WARN_PCT=80
 
-if [[ -d "$WATCH_ROOT" ]]; then
+primary_spin_info=$("${REPO_ROOT}/modules/drives/spin_status.sh" primary)
+primary_spin_state=$(awk '{print $1}' <<< "$primary_spin_info")
+
+if [[ "$primary_spin_state" == "standby" ]]; then
+    log_info "Primary drive in standby — skipping inotify watch capacity scan to avoid waking it."
+elif [[ -d "$WATCH_ROOT" ]]; then
     watch_limit=$(cat /proc/sys/fs/inotify/max_user_watches 2>/dev/null || echo 0)
     dir_count=$(find "$WATCH_ROOT" -xdev -type d 2>/dev/null | wc -l)
 
