@@ -772,3 +772,148 @@ td.mono  { font-family: monospace; font-size: 0.8rem; color: var(--muted); }
   padding: 0.1em 0.35em;
   border-radius: 3px;
 }
+
+/* ── Monitoring page (drive spin timeline) ───────────────────────────────── */
+.monitoring-body {
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.timeline-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.timeline-label {
+  width: 110px;
+  flex-shrink: 0;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timeline-track {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--bg);
+  border: 1px solid var(--border);
+}
+
+.timeline-svg { display: block; width: 100%; height: 100%; }
+
+.spin-active  { fill: var(--ok); }
+.spin-standby { fill: var(--warn); }
+.spin-unknown { fill: var(--muted); }
+
+.timeline-empty {
+  font-size: 0.72rem;
+  color: var(--muted);
+  padding: 0.4rem 0.6rem;
+}
+
+.timeline-axis {
+  position: relative;
+  height: 1rem;
+  margin-left: calc(110px + 0.75rem);
+  font-size: 0.68rem;
+  color: var(--muted);
+  font-family: monospace;
+}
+
+.timeline-tick {
+  position: absolute;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.timeline-tick:first-child { transform: none; }
+.timeline-tick:last-child  { transform: translateX(-100%); }
+
+/* Narrow screens (iPhone-width and below): the fixed 110px label column
+   plus 6-7 absolutely-positioned ticks are too tight and start overlapping.
+   Shrink the label column to give the track more room, and thin out every
+   other interior tick — the ticks are evenly time-spaced already, so
+   dropping alternating ones just reduces density without losing coverage. */
+@media (max-width: 520px) {
+  .timeline-label { width: 64px; font-size: 0.72rem; }
+  .timeline-axis  { margin-left: calc(64px + 0.5rem); font-size: 0.62rem; }
+  .timeline-tick:nth-child(even):not(:last-child) { display: none; }
+}
+
+.timeline-legend {
+  display: flex;
+  gap: 1rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+  padding-top: 0.25rem;
+}
+
+.legend-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  margin-right: 0.3rem;
+  vertical-align: middle;
+}
+
+.legend-swatch.spin-active  { background: var(--ok); }
+.legend-swatch.spin-standby { background: var(--warn); }
+.legend-swatch.spin-unknown { background: var(--muted); }
+
+.wake-events {
+  margin-top: 0.5rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+
+.wake-events-head {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--muted);
+  margin-bottom: 0.4rem;
+}
+
+.wake-events-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  max-height: 220px;
+  overflow-y: auto;
+  font-size: 0.78rem;
+}
+
+.wake-events-list li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: baseline;
+}
+
+.wake-event-time {
+  font-family: monospace;
+  color: var(--muted);
+  flex-shrink: 0;
+  width: 4.5rem;
+}
+
+.wake-event-drive {
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+.wake-event-reason {
+  color: var(--muted);
+}

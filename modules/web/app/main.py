@@ -27,6 +27,7 @@ STAMP_DIR   = Path("/var/lib/nase")
 LOG_DIR     = Path("/var/log/nase")
 CENTRAL_LOG = LOG_DIR / "nase.log"
 EVENTS_LOG  = Path(os.environ.get("NASE_EVENTS_LOG", str(STAMP_DIR / "primary-events.log")))
+SPIN_HISTORY_LOG = STAMP_DIR / "spin-history.log"
 
 _CHANGES_PAGE_SIZE = 20
 _WINDOW_SECS  = {"hour": 3600, "day": 86400, "week": 604800, "month": 2592000}
@@ -140,6 +141,148 @@ def drive_spin_info(name: str, active: bool) -> dict:
         "spin_state": state,
         "spin_duration": _relative_duration(max(diff, 0)),
         "spin_estimated": confidence == "estimated",
+    }
+
+# ── Spin history / monitoring timeline ──────────────────────────────────────────
+# Must match modules/drives/spin_sample.sh's timer interval (OnUnitActiveSec).
+_SPIN_SAMPLE_INTERVAL_SECS = 300
+# How long to trust the most recent sample enough to extend its bar to "now"
+# before showing a gap instead — a few missed ticks are just noise, but a
+# long silence (sampler disabled, drive removed) shouldn't be drawn over.
+_SPIN_STALE_AFTER_SECS = _SPIN_SAMPLE_INTERVAL_SECS * 3
+
+def _read_spin_history() -> dict[str, list[tuple[int, str, str]]]:
+    """drive name -> chronological (epoch, state, wake_reason) samples, oldest first.
+
+    wake_reason is "" except on a standby/unknown -> active transition sample,
+    where spin_sample.sh records its best guess at what caused the wake.
+    """
+    try:
+        lines = SPIN_HISTORY_LOG.read_text().splitlines() if SPIN_HISTORY_LOG.exists() else []
+    except (PermissionError, OSError):
+        lines = []
+    per_drive: dict[str, list[tuple[int, str, str]]] = {}
+    for line in lines:
+        parts = line.split("\t")
+        # Accept both the current 5-field format and the older 4-field one
+        # (no reason column) so pre-upgrade log entries still render.
+        if len(parts) == 5:
+            ts_str, name, state, _method, reason = parts
+        elif len(parts) == 4:
+            ts_str, name, state, _method = parts
+            reason = "-"
+        else:
+            continue
+        try:
+            ts = int(ts_str)
+        except ValueError:
+            continue
+        per_drive.setdefault(name, []).append((ts, state, "" if reason == "-" else reason))
+    for samples in per_drive.values():
+        samples.sort(key=lambda s: s[0])
+    return per_drive
+
+# Tick spacing per window — chosen so labels land on round wall-clock
+# boundaries (":00", ":10", midnight, ...) instead of an arbitrary offset
+# from "now", and so there are few enough of them to stay readable on a
+# narrow (phone-width) screen.
+_TICK_STEP_SECS = {"hour": 600, "day": 14400, "week": 86400, "month": 432000}
+
+def _aligned_ticks(start: int, secs: int, step: int, fmt: str) -> list[dict]:
+    now = start + secs
+    # Align to local wall-clock boundaries, not raw UTC epoch multiples —
+    # otherwise a 4-hour step would land on odd hours wherever the server's
+    # UTC offset isn't itself a multiple of 4.
+    local_offset = int(datetime.now().astimezone().utcoffset().total_seconds())
+    first = ((start + local_offset) // step) * step - local_offset
+    if first < start:
+        first += step
+    ticks = []
+    t = first
+    while t <= now:
+        ticks.append({
+            "pct":   round((t - start) / secs * 100, 3),
+            "label": datetime.fromtimestamp(t).strftime(fmt),
+        })
+        t += step
+    return ticks
+
+def build_monitoring(cfg: dict, window: str = "day") -> dict:
+    secs  = _WINDOW_SECS.get(window, 86400)
+    now   = int(datetime.now().timestamp())
+    start = now - secs
+    per_drive = _read_spin_history()
+
+    drives = []
+    wake_events = []
+    for d in cfg.get("drives", []):
+        if d.get("active") is False:
+            continue
+        name    = d["name"]
+        samples = per_drive.get(name, [])
+        in_window = [s for s in samples if s[0] >= start]
+        before    = [s for s in samples if s[0] < start]
+        # Carry the last sample before the window in too, so the first bar
+        # reflects the state that was already true at window start instead
+        # of opening with a gap.
+        windowed = ([before[-1]] if before else []) + in_window
+
+        for ts, state, reason in in_window:
+            if state == "active" and reason:
+                wake_events.append({"ts": ts, "drive": name, "reason": reason})
+
+        segments = []
+        if windowed:
+            # Collapse consecutive equal-state samples into runs, keeping
+            # the reason recorded on the run's first (wake) sample.
+            runs = []
+            for ts, state, reason in windowed:
+                if runs and runs[-1][1] == state:
+                    continue
+                runs.append((ts, state, reason))
+            last_sample_ts = windowed[-1][0]
+            for i, (run_start, state, reason) in enumerate(runs):
+                if i + 1 < len(runs):
+                    run_end = runs[i + 1][0]
+                elif now - last_sample_ts <= _SPIN_STALE_AFTER_SECS:
+                    run_end = now
+                else:
+                    run_end = last_sample_ts
+                seg_start = max(run_start, start)
+                seg_end   = min(run_end, now)
+                if seg_end <= seg_start:
+                    continue
+                time_label = datetime.fromtimestamp(seg_start).strftime(
+                    "%H:%M" if secs <= 86400 else "%m-%d %H:%M")
+                if state == "active":
+                    tooltip = f"Spinning up at {time_label}" + (f" — {reason}" if reason else "")
+                else:
+                    tooltip = f"{state.capitalize()} since {time_label}"
+                segments.append({
+                    "state":     state,
+                    "left_pct":  round((seg_start - start) / secs * 100, 3),
+                    "width_pct": round(max((seg_end - seg_start) / secs * 100, 0.05), 3),
+                    "tooltip":   tooltip,
+                })
+
+        drives.append({"name": name, "segments": segments, "has_data": bool(windowed)})
+
+    wake_events.sort(key=lambda e: e["ts"], reverse=True)
+    wake_events = wake_events[:100]
+    wake_fmt = "%H:%M" if secs <= 86400 else "%m-%d %H:%M"
+    for e in wake_events:
+        e["time"] = datetime.fromtimestamp(e["ts"]).strftime(wake_fmt)
+
+    fmt  = "%H:%M" if secs <= 86400 else "%m-%d"
+    step = _TICK_STEP_SECS.get(window, 14400)
+    ticks = _aligned_ticks(start, secs, step, fmt)
+
+    return {
+        "drives":      drives,
+        "window":      window,
+        "label":       _WINDOW_LABEL.get(window, "24 hours"),
+        "ticks":       ticks,
+        "wake_events": wake_events,
     }
 
 # ── Stamp info ─────────────────────────────────────────────────────────────────
@@ -534,6 +677,26 @@ async def partial_integrity(request: Request):
     cfg = load_config()
     return templates.TemplateResponse(request, "partials/integrity.html", {
         "integrity": build_integrity(cfg),
+    })
+
+@app.get("/monitoring", response_class=HTMLResponse)
+async def monitoring_page(request: Request, window: str = Query("day")):
+    cfg = load_config()
+    if window not in _WINDOW_SECS:
+        window = "day"
+    return templates.TemplateResponse(request, "monitoring.html", {
+        "hostname":   cfg.get("nas", {}).get("hostname", "nase"),
+        "page":       "monitoring",
+        "monitoring": build_monitoring(cfg, window),
+    })
+
+@app.get("/partials/monitoring", response_class=HTMLResponse)
+async def partial_monitoring(request: Request, window: str = Query("day")):
+    cfg = load_config()
+    if window not in _WINDOW_SECS:
+        window = "day"
+    return templates.TemplateResponse(request, "partials/monitoring.html", {
+        "monitoring": build_monitoring(cfg, window),
     })
 
 @app.get("/partials/logs", response_class=HTMLResponse)

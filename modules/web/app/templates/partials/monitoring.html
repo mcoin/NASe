@@ -1,0 +1,70 @@
+<div id="monitoring-card" class="card"
+     hx-get="/partials/monitoring?window={{ monitoring.window }}"
+     hx-trigger="every 60s"
+     hx-swap="outerHTML">
+
+  <div class="card-head">
+    <span>Drive Spin Timeline</span>
+    <div class="changes-controls">
+      {% for w, lbl in [("hour","1h"),("day","24h"),("week","7d"),("month","30d")] %}
+      <button class="win-btn{% if monitoring.window == w %} win-btn-active{% endif %}"
+              hx-get="/partials/monitoring?window={{ w }}"
+              hx-target="#monitoring-card"
+              hx-swap="outerHTML">{{ lbl }}</button>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="card-body monitoring-body">
+    {% if monitoring.drives|length == 0 %}
+    <div class="changes-empty">No active drives configured.</div>
+    {% else %}
+
+    {% for d in monitoring.drives %}
+    <div class="timeline-row">
+      <div class="timeline-label">{{ d.name }}</div>
+      <div class="timeline-track">
+        {% if not d.has_data %}
+        <div class="timeline-empty">No spin history yet</div>
+        {% else %}
+        <svg class="timeline-svg" viewBox="0 0 100 28" preserveAspectRatio="none">
+          {% for seg in d.segments %}
+          <rect x="{{ seg.left_pct }}" y="0" width="{{ seg.width_pct }}" height="28"
+                class="spin-seg spin-{{ seg.state }}"><title>{{ seg.tooltip }}</title></rect>
+          {% endfor %}
+        </svg>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+
+    <div class="timeline-axis">
+      {% for t in monitoring.ticks %}
+      <span class="timeline-tick" style="left: {{ t.pct }}%">{{ t.label }}</span>
+      {% endfor %}
+    </div>
+
+    <div class="timeline-legend">
+      <span><i class="legend-swatch spin-active"></i> spinning</span>
+      <span><i class="legend-swatch spin-standby"></i> standby</span>
+      <span><i class="legend-swatch spin-unknown"></i> unknown</span>
+    </div>
+
+    <div class="wake-events">
+      <div class="wake-events-head">Wake-up events in this window</div>
+      {% if monitoring.wake_events|length == 0 %}
+      <div class="changes-empty">No wake-ups recorded — drives stayed idle whenever they weren't in use.</div>
+      {% else %}
+      <ul class="wake-events-list">
+        {% for e in monitoring.wake_events %}
+        <li><span class="wake-event-time">{{ e.time }}</span>
+            <span class="wake-event-drive">{{ e.drive }}</span>
+            <span class="wake-event-reason">{{ e.reason }}</span></li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+    </div>
+
+    {% endif %}
+  </div>
+</div>

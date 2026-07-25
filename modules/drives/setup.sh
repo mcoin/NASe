@@ -133,3 +133,55 @@ done
 # Apply spindown rules
 log_info "Applying spindown rules..."
 "${REPO_ROOT}/modules/drives/spindown.sh"
+
+# ── Spin-history sampler ────────────────────────────────────────────────────
+# Periodically samples every drive's spin state and appends to
+# /var/lib/nase/spin-history.log, so the web dashboard's Monitoring tab can
+# render a spin/idle timeline. Runs on its own timer rather than piggybacking
+# on nase-monitor.timer, which only fires once a day — far too sparse for a
+# timeline.
+SPIN_SAMPLE_SCRIPT="${REPO_ROOT}/modules/drives/spin_sample.sh"
+
+spin_sample_service="# Managed by NASe — do not edit manually. Re-run apply.sh instead.
+[Unit]
+Description=NASe drive spin-state sampler
+
+[Service]
+Type=oneshot
+ExecStart=${SPIN_SAMPLE_SCRIPT}
+Environment=REPO_ROOT=${REPO_ROOT}
+
+[Install]
+WantedBy=multi-user.target"
+
+spin_sample_service_file="${SYSTEMD_DIR}/nase-spin-sample.service"
+if [[ ! -f "$spin_sample_service_file" ]] || ! diff -q <(echo "$spin_sample_service") "$spin_sample_service_file" &>/dev/null; then
+    log_info "Writing ${spin_sample_service_file}"
+    echo "$spin_sample_service" > "$spin_sample_service_file"
+fi
+
+# Not config-driven — 5 minutes balances timeline resolution against SD-card
+# write churn (see spin_sample.sh); even at this interval the 30-day window
+# button is only a few thousand small appends total.
+spin_sample_timer="# Managed by NASe — do not edit manually. Re-run apply.sh instead.
+[Unit]
+Description=NASe drive spin-state sampler timer
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Persistent=true
+Unit=nase-spin-sample.service
+
+[Install]
+WantedBy=timers.target"
+
+spin_sample_timer_file="${SYSTEMD_DIR}/nase-spin-sample.timer"
+if [[ ! -f "$spin_sample_timer_file" ]] || ! diff -q <(echo "$spin_sample_timer") "$spin_sample_timer_file" &>/dev/null; then
+    log_info "Writing ${spin_sample_timer_file}"
+    echo "$spin_sample_timer" > "$spin_sample_timer_file"
+fi
+
+systemctl daemon-reload
+systemctl enable --now nase-spin-sample.timer
+log_ok "Spin-history sampler timer enabled (every 5min)."
