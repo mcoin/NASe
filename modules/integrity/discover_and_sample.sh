@@ -369,4 +369,8 @@ fi
 
 [[ -n "$_date_stamp" ]] && date +%Y-%m-%d > "$_date_stamp"
 
+# Refresh the dashboard's SD-card cache now, while the drive is already
+# awake for this run — see integrity_write_status_cache in common.sh.
+integrity_write_status_cache "$MOUNTPOINT" "$DB" || true
+
 log_ok "Integrity: ${MOUNTPOINT} run complete (discovered ${hashed_count}, budget ${BUDGET}, flagged ${#FLAGGED_PATHS[@]})."

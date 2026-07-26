@@ -112,4 +112,8 @@ if [[ -n "$last_line" ]]; then
     integrity_meta_set "$DB" "primary_events_cursor" "$last_line"
 fi
 
+# Refresh the dashboard's SD-card cache now, while primary is already
+# awake for this reconcile — see integrity_write_status_cache in common.sh.
+integrity_write_status_cache "$MOUNTPOINT" "$DB" || true
+
 log_info "Integrity: ${MOUNTPOINT} reconciled ${processed} event(s) from primary-events.log."

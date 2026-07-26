@@ -121,4 +121,9 @@ if [[ -n "$dest_batch" ]]; then
         | sqlite3 -bail -cmd ".timeout 30000" "$dest_db"
 fi
 
+# Refresh the dashboard's SD-card cache now, while both drives are already
+# awake for this sync run — see integrity_write_status_cache in common.sh.
+[[ "$source_ok" == "true" ]] && { integrity_write_status_cache "$source_mount" "$source_db" || true; }
+[[ "$dest_ok"   == "true" ]] && { integrity_write_status_cache "$dest_mount" "$dest_db" || true; }
+
 log_info "Integrity: reconciled ${SOURCE_PATH} -> ${DEST_PATH}."

@@ -76,11 +76,23 @@ for i in $(seq 0 $((n - 1))); do
 
     if [[ -f "$db" ]]; then
         log_info "  Drive '${name}': manifest already exists (${db})."
-        # Re-assert permissions every run in case something (e.g. a manual
-        # 'fix-ownership.sh' run predating its .nase exclusion) changed them.
-        chown root:root "$nase_dir"
-        chmod 0700 "$nase_dir"
+        # Re-assert permissions in case something (e.g. a manual
+        # 'fix-ownership.sh' run predating its .nase exclusion) changed
+        # them — but only while rw: chown/chmod fail outright on a
+        # read-only mount, and backup drives spend most of their life
+        # read-only at rest, so this used to break every 'apply.sh' run
+        # that landed while a backup drive was in its normal resting
+        # state. Safe to skip while ro: nothing could have changed .nase/'s
+        # permissions since the last rw session in the first place.
+        if [[ "$is_ro" != "true" ]]; then
+            chown root:root "$nase_dir"
+            chmod 0700 "$nase_dir"
+        fi
         _set_journal_mode
+        # apply.sh already has this drive mounted/awake for the checks
+        # above, so refreshing the dashboard's SD-card cache here is free —
+        # keeps it in sync even if nothing else touches this drive tonight.
+        integrity_write_status_cache "$mountpoint" "$db" || true
         continue
     fi
 
@@ -98,6 +110,9 @@ for i in $(seq 0 $((n - 1))); do
         integrity_meta_set "$db" "drive_uuid" "$uuid"
         integrity_meta_set "$db" "discovery_cursor_n" "0"
         integrity_meta_set "$db" "discovery_complete" "false"
+        # So the dashboard has something to show (all zeros, discovery not
+        # started) before the first nightly pass ever runs.
+        integrity_write_status_cache "$mountpoint" "$db" || true
     }
 
     if [[ "$is_ro" == "true" ]]; then

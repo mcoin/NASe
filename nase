@@ -427,6 +427,10 @@ UPDATE files SET status='ok', last_checked=${now} WHERE path = '${esc_path}';
 INSERT INTO events (ts, path, event_type, detail) VALUES (${now}, '${esc_path}', 'ack', 'acknowledged via nase CLI');
 COMMIT;
 SQL
+            # Refresh the dashboard's SD-card cache immediately, rather than
+            # leaving it showing the just-acked file as flagged until the
+            # next nightly integrity pass — see common.sh.
+            integrity_write_status_cache "$mp" "$db" || true
             log_ok "Acknowledged '${path}' on drive '${target}' — marked ok."
             ;;
         bootstrap)

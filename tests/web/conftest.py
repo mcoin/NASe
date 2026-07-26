@@ -6,7 +6,9 @@ Or via the shell wrapper:
     bash tests/web/run.sh
 """
 import base64
+import os
 import sqlite3
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -23,8 +25,11 @@ INTEGRITY_SCHEMA = REPO_ROOT / "modules" / "integrity" / "schema.sql"
 
 
 def make_integrity_db(db_path: Path, *, rows=(), events=(), meta=None):
-    """Build a real .nase/integrity.db (using the actual production schema)
-    for tests to point drive_integrity_info()/build_integrity() at."""
+    """Build a real .nase/integrity.db (using the actual production schema).
+    Used on its own by tests that exercise the manifest DB directly; use
+    make_integrity_cache() below for anything the web app itself reads,
+    since main.py no longer opens this DB (see modules/integrity/common.sh's
+    integrity_write_status_cache)."""
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path)
     conn.executescript(INTEGRITY_SCHEMA.read_text())
@@ -44,6 +49,34 @@ def make_integrity_db(db_path: Path, *, rows=(), events=(), meta=None):
         conn.execute("INSERT INTO meta (key, value) VALUES (?, ?)", (key, value))
     conn.commit()
     conn.close()
+
+
+def make_integrity_cache(stamp_dir: Path, mountpoint, *, rows=(), events=(), meta=None):
+    """Build a real .nase/integrity.db, then run the actual production
+    integrity_write_status_cache (modules/integrity/common.sh) against it to
+    produce the SD-card status cache — the same code path
+    modules/integrity's own scripts use, and the only thing
+    drive_integrity_info()/build_integrity() read (see main.py). Exercising
+    the real bash/SQL here, rather than a Python reimplementation of it,
+    means a change to the cache's shape on either side breaks this test."""
+    mountpoint = Path(mountpoint)
+    db = mountpoint / ".nase" / "integrity.db"
+    make_integrity_db(db, rows=rows, events=events, meta=meta)
+
+    script = (
+        'set -euo pipefail\n'
+        f'source "{REPO_ROOT}/lib/log.sh"\n'
+        f'source "{REPO_ROOT}/modules/integrity/common.sh"\n'
+        'integrity_write_status_cache "$1" "$2"\n'
+    )
+    env = os.environ.copy()
+    env["NASE_STAMP_DIR"] = str(stamp_dir)
+    env["REPO_ROOT"] = str(REPO_ROOT)
+    subprocess.run(
+        ["bash", "-c", script, "_", str(mountpoint), str(db)],
+        check=True, capture_output=True, text=True, env=env,
+    )
+    return db
 
 MINIMAL_CONFIG = """\
 nas:

@@ -169,3 +169,78 @@ integrity_log_event() {
 _integrity_escape() {
     printf '%s' "${1//\'/\'\'}"
 }
+
+# integrity_status_cache_path MOUNTPOINT
+# SD-card path for a drive's cached status snapshot — see
+# integrity_write_status_cache. Slug matches the lock/date-stamp naming
+# already used elsewhere in this module (leading "/" stripped, "/" -> "-").
+integrity_status_cache_path() {
+    local slug="${1#/}"
+    slug="${slug//\//-}"
+    echo "${NASE_STAMP_DIR:-/var/lib/nase}/integrity-status/${slug}.json"
+}
+
+# integrity_write_status_cache MOUNTPOINT DB
+# Snapshots exactly what the web dashboard's /integrity page needs (counts,
+# discovery progress, flagged files) to a JSON file on the SD card, so that
+# page never has to open the manifest on the drive itself — which, on an
+# HTMX page that polls every 60s, would otherwise keep re-waking (or simply
+# keep from ever spinning down) any drive with the page left open in a
+# browser tab, not just wake it once on load.
+#
+# Call this right after any write to DB — the drive is already awake for
+# that write, so this adds no extra spin-up of its own. The dashboard shows
+# whatever was last written here (see "updated_at"), so it lags reality by
+# however long it's been since the drive last actually ran an integrity
+# pass — that's the deliberate trade for never waking the drive just to look.
+integrity_write_status_cache() {
+    local mountpoint="$1" db="$2"
+    local cache_dir cache_file tmp
+    cache_dir="${NASE_STAMP_DIR:-/var/lib/nase}/integrity-status"
+    mkdir -p "$cache_dir"
+    cache_file=$(integrity_status_cache_path "$mountpoint")
+    tmp=$(mktemp -p "$cache_dir")
+    if ! sqlite3 -bail -cmd ".timeout 30000" "$db" <<'SQL' > "$tmp"
+WITH counts AS (
+  SELECT
+    (SELECT COUNT(*) FROM files WHERE status='ok')      AS ok_n,
+    (SELECT COUNT(*) FROM files WHERE status='flagged') AS flagged_n
+),
+flagged AS (
+  SELECT f.path, f.last_checked, e.event_type, e.detail
+  FROM files f
+  LEFT JOIN events e ON e.id = (
+    SELECT id FROM events e2
+    WHERE e2.path = f.path AND e2.event_type IN ('mismatch', 'missing')
+    ORDER BY e2.ts DESC LIMIT 1
+  )
+  WHERE f.status = 'flagged'
+  ORDER BY f.last_checked DESC
+  LIMIT 200
+)
+SELECT json_object(
+  'has_manifest',       json('true'),
+  'total',               (SELECT ok_n + flagged_n FROM counts),
+  'ok',                  (SELECT ok_n FROM counts),
+  'flagged',             (SELECT flagged_n FROM counts),
+  'discovery_complete',  json(CASE WHEN (SELECT value FROM meta WHERE key='discovery_complete') = 'true'
+                                THEN 'true' ELSE 'false' END),
+  'discovery_total',     (SELECT value FROM meta WHERE key='discovery_total'),
+  'flagged_truncated',   json(CASE WHEN (SELECT flagged_n FROM counts) > (SELECT COUNT(*) FROM flagged)
+                                THEN 'true' ELSE 'false' END),
+  'updated_at',          CAST(strftime('%s','now') AS INTEGER),
+  'flagged_rows',        (SELECT json_group_array(json_object(
+                             'path', path, 'last_checked', last_checked,
+                             'event_type', COALESCE(event_type, 'unknown'),
+                             'detail', COALESCE(detail, '')
+                           )) FROM flagged)
+);
+SQL
+    then
+        rm -f "$tmp"
+        log_warn "Integrity: failed to write status cache for ${mountpoint} — dashboard will show stale/no data."
+        return 1
+    fi
+    mv "$tmp" "$cache_file"
+    chmod 644 "$cache_file"
+}

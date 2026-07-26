@@ -108,6 +108,10 @@
         Review with <code>sudo nase integrity status {{ d.name }}</code>,
         clear with <code>sudo nase integrity ack {{ d.name }} &lt;path&gt;</code>.
       </span>
+      <span class="muted">
+        {% if d.updated_at %}As of {{ d.updated_at }} — read from a cache, not the drive itself, so it never wakes it up.
+        {% else %}Not yet updated by an integrity pass.{% endif %}
+      </span>
     </div>
 
     {% endif %}

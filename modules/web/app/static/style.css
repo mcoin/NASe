@@ -761,6 +761,9 @@ td.mono  { font-family: monospace; font-size: 0.8rem; color: var(--muted); }
 }
 
 .integrity-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
   padding: 0.6rem 1rem;
   border-top: 1px solid var(--border);
   font-size: 0.72rem;

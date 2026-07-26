@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import re
 import secrets
-import sqlite3
 import subprocess
 from datetime import datetime
 from pathlib import Path
@@ -476,85 +476,66 @@ def build_changes(window: str = "day", page: int = 1, group: bool = False) -> di
     }
 
 # ── Integrity manifest (modules/integrity) ────────────────────────────────────
-_INTEGRITY_FLAGGED_LIMIT = 200
-
-def _integrity_db_path(mountpoint: str) -> Path:
-    return Path(mountpoint) / ".nase" / "integrity.db"
-
-def _integrity_query(db: Path, sql: str, params: tuple = ()) -> list[tuple]:
-    """Read-only query against a drive's manifest. Never opens for writing —
-    this dashboard must not be able to corrupt or lock a DB that
-    modules/integrity's own scripts are concurrently updating."""
-    try:
-        with sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=5) as conn:
-            return conn.execute(sql, params).fetchall()
-    except sqlite3.Error:
-        return []
-
-def _integrity_meta(db: Path, key: str) -> str | None:
-    rows = _integrity_query(db, "SELECT value FROM meta WHERE key = ?", (key,))
-    return rows[0][0] if rows else None
+# Status is read from a cache the integrity scripts write to the SD card
+# after every write to a drive's manifest (modules/integrity/common.sh's
+# integrity_write_status_cache) — never from the manifest DB on the drive
+# itself. This page polls every 60s (see partials/integrity.html); querying
+# the drive-hosted DB directly on every poll would keep a drive that's
+# otherwise idle from ever spinning down for as long as the tab stayed
+# open. The trade-off: numbers here lag reality by however long it's been
+# since the drive last actually ran an integrity pass — see "updated_at".
+def _integrity_cache_path(mountpoint: str) -> Path:
+    # STAMP_DIR read at call time, not import time, so tests can monkeypatch it.
+    slug = mountpoint.strip("/").replace("/", "-")
+    return STAMP_DIR / "integrity-status" / f"{slug}.json"
 
 def drive_integrity_info(name: str, mountpoint: str) -> dict:
-    db = _integrity_db_path(mountpoint)
-    if not mountpoint or not db.exists():
+    cache = _integrity_cache_path(mountpoint)
+    if not mountpoint or not cache.exists():
+        return {"name": name, "mountpoint": mountpoint, "has_manifest": False}
+    try:
+        data = json.loads(cache.read_text())
+    except (OSError, ValueError):
         return {"name": name, "mountpoint": mountpoint, "has_manifest": False}
 
-    # status is NOT NULL and CHECK-constrained to 'ok'/'flagged' (schema.sql),
-    # so total is just their sum — no need for a separate, unfiltered
-    # COUNT(*) that (unlike these two) can't use idx_files_sample(status,
-    # last_checked) as a search and has to scan every row instead. On a
-    # multi-million-row table on a slow external drive that scan alone took
-    # 40-90s versus under a second for each of these.
-    ok_n      = (_integrity_query(db, "SELECT COUNT(*) FROM files WHERE status='ok'") or [(0,)])[0][0]
-    flagged_n = (_integrity_query(db, "SELECT COUNT(*) FROM files WHERE status='flagged'") or [(0,)])[0][0]
-    total_n   = ok_n + flagged_n
-
-    discovery_complete = _integrity_meta(db, "discovery_complete") == "true"
+    total_n = data.get("total", 0)
+    discovery_complete = bool(data.get("discovery_complete"))
     discovery_pct = None
     if not discovery_complete:
-        discovery_total_raw = _integrity_meta(db, "discovery_total")
         try:
-            discovery_total = int(discovery_total_raw) if discovery_total_raw else 0
-        except ValueError:
+            discovery_total = int(data.get("discovery_total") or 0)
+        except (TypeError, ValueError):
             discovery_total = 0
         if discovery_total > 0:
             discovery_pct = round(min(100, total_n / discovery_total * 100))
 
-    flagged_rows = _integrity_query(db, f"""
-        SELECT f.path, f.last_checked, e.event_type, e.detail
-        FROM files f
-        LEFT JOIN events e ON e.id = (
-            SELECT id FROM events e2
-            WHERE e2.path = f.path AND e2.event_type IN ('mismatch', 'missing')
-            ORDER BY e2.ts DESC LIMIT 1
-        )
-        WHERE f.status = 'flagged'
-        ORDER BY f.last_checked DESC
-        LIMIT {_INTEGRITY_FLAGGED_LIMIT}
-    """)
+    flagged_rows = data.get("flagged_rows") or []
     flagged = [
         {
-            "path":       path,
-            "checked":    datetime.fromtimestamp(last_checked).strftime("%Y-%m-%d %H:%M:%S")
-                          if last_checked else "—",
-            "event_type": event_type or "unknown",
-            "detail":     detail or "",
+            "path":       row.get("path", ""),
+            "checked":    datetime.fromtimestamp(row["last_checked"]).strftime("%Y-%m-%d %H:%M:%S")
+                          if row.get("last_checked") else "—",
+            "event_type": row.get("event_type") or "unknown",
+            "detail":     row.get("detail") or "",
         }
-        for path, last_checked, event_type, detail in flagged_rows
+        for row in flagged_rows
     ]
+
+    updated_at = data.get("updated_at")
 
     return {
         "name":               name,
         "mountpoint":         mountpoint,
         "has_manifest":       True,
         "total":              total_n,
-        "ok":                 ok_n,
-        "flagged":            flagged_n,
+        "ok":                 data.get("ok", 0),
+        "flagged":            data.get("flagged", 0),
         "discovery_complete": discovery_complete,
         "discovery_pct":      discovery_pct,
         "flagged_rows":       flagged,
-        "flagged_truncated":  flagged_n > len(flagged),
+        "flagged_truncated":  bool(data.get("flagged_truncated")),
+        "updated_at":         datetime.fromtimestamp(updated_at).strftime("%Y-%m-%d %H:%M:%S")
+                              if updated_at else None,
     }
 
 def build_integrity(cfg: dict) -> dict:

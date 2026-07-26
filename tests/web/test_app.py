@@ -6,7 +6,7 @@ from unittest.mock import patch
 import pytest
 import yaml
 
-from conftest import make_integrity_db
+from conftest import make_integrity_cache
 
 
 # ── read_log ───────────────────────────────────────────────────────────────────
@@ -319,12 +319,13 @@ def test_drive_integrity_info_empty_mountpoint():
     assert info["has_manifest"] is False
 
 
-def test_drive_integrity_info_counts_and_discovery(tmp_path):
+def test_drive_integrity_info_counts_and_discovery(tmp_path, stamp_dir, monkeypatch):
     import modules.web.app.main as m
-    db = tmp_path / "drive1" / ".nase" / "integrity.db"
+    monkeypatch.setattr(m, "STAMP_DIR", stamp_dir)
+    mountpoint = tmp_path / "drive1"
     now = int(time.time())
-    make_integrity_db(
-        db,
+    make_integrity_cache(
+        stamp_dir, mountpoint,
         rows=[
             ("a.txt", 10, now, "aaa", "ok", now),
             ("b.txt", 10, now, "bbb", "ok", now),
@@ -332,7 +333,7 @@ def test_drive_integrity_info_counts_and_discovery(tmp_path):
         ],
         meta={"discovery_complete": "false", "discovery_total": "6", "drive_uuid": "x"},
     )
-    info = m.drive_integrity_info("drive1", str(tmp_path / "drive1"))
+    info = m.drive_integrity_info("drive1", str(mountpoint))
     assert info["has_manifest"] is True
     assert info["total"] == 3
     assert info["ok"] == 2
@@ -342,26 +343,28 @@ def test_drive_integrity_info_counts_and_discovery(tmp_path):
     assert info["discovery_pct"] == 50
 
 
-def test_drive_integrity_info_discovery_complete_has_no_pct(tmp_path):
+def test_drive_integrity_info_discovery_complete_has_no_pct(tmp_path, stamp_dir, monkeypatch):
     import modules.web.app.main as m
-    db = tmp_path / "drive1" / ".nase" / "integrity.db"
-    make_integrity_db(db, meta={"discovery_complete": "true"})
-    info = m.drive_integrity_info("drive1", str(tmp_path / "drive1"))
+    monkeypatch.setattr(m, "STAMP_DIR", stamp_dir)
+    mountpoint = tmp_path / "drive1"
+    make_integrity_cache(stamp_dir, mountpoint, meta={"discovery_complete": "true"})
+    info = m.drive_integrity_info("drive1", str(mountpoint))
     assert info["discovery_complete"] is True
     assert info["discovery_pct"] is None
 
 
-def test_drive_integrity_info_flagged_rows_include_event_detail(tmp_path):
+def test_drive_integrity_info_flagged_rows_include_event_detail(tmp_path, stamp_dir, monkeypatch):
     import modules.web.app.main as m
-    db = tmp_path / "drive1" / ".nase" / "integrity.db"
+    monkeypatch.setattr(m, "STAMP_DIR", stamp_dir)
+    mountpoint = tmp_path / "drive1"
     now = int(time.time())
-    make_integrity_db(
-        db,
+    make_integrity_cache(
+        stamp_dir, mountpoint,
         rows=[("bad.txt", 10, now, "aaa", "flagged", now)],
         events=[("bad.txt", "mismatch", "expected aaa got zzz")],
         meta={"discovery_complete": "true"},
     )
-    info = m.drive_integrity_info("drive1", str(tmp_path / "drive1"))
+    info = m.drive_integrity_info("drive1", str(mountpoint))
     assert len(info["flagged_rows"]) == 1
     row = info["flagged_rows"][0]
     assert row["path"] == "bad.txt"
@@ -369,16 +372,17 @@ def test_drive_integrity_info_flagged_rows_include_event_detail(tmp_path):
     assert "expected aaa got zzz" in row["detail"]
 
 
-def test_drive_integrity_info_flagged_rows_only_ok_excluded(tmp_path):
+def test_drive_integrity_info_flagged_rows_only_ok_excluded(tmp_path, stamp_dir, monkeypatch):
     import modules.web.app.main as m
-    db = tmp_path / "drive1" / ".nase" / "integrity.db"
+    monkeypatch.setattr(m, "STAMP_DIR", stamp_dir)
+    mountpoint = tmp_path / "drive1"
     now = int(time.time())
-    make_integrity_db(
-        db,
+    make_integrity_cache(
+        stamp_dir, mountpoint,
         rows=[("good.txt", 10, now, "aaa", "ok", now)],
         meta={"discovery_complete": "true"},
     )
-    info = m.drive_integrity_info("drive1", str(tmp_path / "drive1"))
+    info = m.drive_integrity_info("drive1", str(mountpoint))
     assert info["flagged_rows"] == []
 
 
@@ -434,13 +438,12 @@ def test_integrity_page_disabled_shows_hint(client):
     assert "integrity.enabled" in r.text
 
 
-def test_integrity_page_shows_flagged_file(integrity_client, integrity_config_file):
-    import modules.web.app.main as m
+def test_integrity_page_shows_flagged_file(integrity_client, integrity_config_file, stamp_dir):
     cfg = yaml.safe_load(integrity_config_file.read_text())
     mountpoint = cfg["drives"][0]["mountpoint"]
     now = int(time.time())
-    make_integrity_db(
-        m._integrity_db_path(mountpoint),
+    make_integrity_cache(
+        stamp_dir, mountpoint,
         rows=[("movies/bad.mp4", 10, now, "aaa", "flagged", now)],
         events=[("movies/bad.mp4", "mismatch", "expected aaa got zzz")],
         meta={"discovery_complete": "true"},
@@ -450,13 +453,12 @@ def test_integrity_page_shows_flagged_file(integrity_client, integrity_config_fi
     assert "mismatch" in r.text
 
 
-def test_integrity_page_no_flagged_files_shows_all_clear(integrity_client, integrity_config_file):
-    import modules.web.app.main as m
+def test_integrity_page_no_flagged_files_shows_all_clear(integrity_client, integrity_config_file, stamp_dir):
     cfg = yaml.safe_load(integrity_config_file.read_text())
     mountpoint = cfg["drives"][0]["mountpoint"]
     now = int(time.time())
-    make_integrity_db(
-        m._integrity_db_path(mountpoint),
+    make_integrity_cache(
+        stamp_dir, mountpoint,
         rows=[("ok.txt", 10, now, "aaa", "ok", now)],
         meta={"discovery_complete": "true"},
     )
