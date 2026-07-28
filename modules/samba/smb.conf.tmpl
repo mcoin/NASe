@@ -24,8 +24,20 @@
    max log size = 10240
    logging = file
 
+   # Share-connect auditing — lets the Monitoring tab attribute a drive
+   # wake-up to a Samba client even when the connection was brief enough
+   # to have already ended by the time spin_sample.sh takes its next
+   # sample (smbstatus only shows what's connected *right now*). Logs one
+   # syslog line per tree-connect (and disconnect), not per file operation,
+   # so this doesn't turn into a firehose.
+   full_audit:prefix = %u|%I|%S
+   full_audit:success = connect disconnect
+   full_audit:failure = connect
+   full_audit:facility = LOCAL7
+   full_audit:priority = NOTICE
+
    # macOS / iOS compatibility (SMB2/3 + Apple metadata)
-   vfs objects = fruit streams_xattr
+   vfs objects = fruit streams_xattr full_audit
    fruit:metadata = stream
    fruit:model = MacSamba
    fruit:posix_rename = yes

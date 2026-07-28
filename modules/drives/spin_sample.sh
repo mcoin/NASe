@@ -92,21 +92,26 @@ guess_wake_reason() {
         fi
     fi
 
-    if [[ -z "$reason" ]] && command -v smbstatus &>/dev/null; then
-        local connected shn shp j
-        connected=$(smbstatus --shares 2>/dev/null | awk 'NR>2 {print $1}') || connected=""
-        if [[ -n "$connected" ]]; then
-            local shares_n
-            shares_n=$(config_len '.samba.shares')
-            for j in $(seq 0 $((shares_n - 1))); do
-                shn=$(config_idx '.samba.shares' "$j" '.name')
-                shp=$(config_idx '.samba.shares' "$j" '.path')
-                if [[ "$shp" == "$mountpoint"* ]] && grep -qx "$shn" <<< "$connected"; then
-                    reason="Samba client connected (share: ${shn})"
-                    break
-                fi
-            done
-        fi
+    # Tree-connect audit (full_audit vfs module, see smb.conf.tmpl) rather than
+    # a live `smbstatus` snapshot: a client that already disconnected within
+    # the sampling gap (e.g. a phone briefly browsing a share) would be
+    # invisible to a snapshot but still shows up here, since it's a log of
+    # what happened over the whole window, not just what's connected now.
+    if [[ -z "$reason" ]]; then
+        local shn shp j shares_n hit client
+        shares_n=$(config_len '.samba.shares')
+        for j in $(seq 0 $((shares_n - 1))); do
+            shn=$(config_idx '.samba.shares' "$j" '.name')
+            shp=$(config_idx '.samba.shares' "$j" '.path')
+            [[ "$shp" == "$mountpoint"* ]] || continue
+            hit=$(journalctl -t smbd_audit --since "@$((now - window))" -q --no-pager 2>/dev/null \
+                  | awk -F'|' -v s="$shn" '$3==s && $4=="connect" && $5=="ok" {print}' | tail -1) || true
+            if [[ -n "$hit" ]]; then
+                client=$(awk -F'|' '{print $2}' <<< "$hit")
+                reason="Samba client connected (share: ${shn}${client:+, client ${client}})"
+                break
+            fi
+        done
     fi
 
     # The web dashboard's /integrity page reads <mountpoint>/.nase/integrity.db
