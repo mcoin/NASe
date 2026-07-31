@@ -1140,3 +1140,44 @@ td.mono  { font-family: monospace; font-size: 0.8rem; color: var(--muted); }
   gap: 0.3rem;
   flex-shrink: 0;
 }
+
+/* Phone widths: the items in a backlog row cannot share one line. Every other
+   item (badge, the four 26px move buttons, the relation label on the detail
+   page) is flex-shrink: 0, so .backlog-title — the only flexible one — absorbs
+   the entire squeeze and wraps to about one word per line, turning each row
+   into a tall block, and the rightmost control is pushed to the screen edge.
+   Give the title a line of its own and let the metadata and the controls share
+   a second line below it. Applies to both the list rows (.backlog-row) and the
+   related-ticket rows on the detail page (.backlog-link-row), which have the
+   same shape and the same symptom.
+   The move buttons stay: HTML5 drag-and-drop does not fire on iOS touch, so
+   they are the only way to reorder the backlog from a phone. */
+@media (max-width: 520px) {
+  .backlog-row,
+  .backlog-link-row {
+    flex-wrap: wrap;
+    gap: 0.35rem 0.5rem;
+  }
+
+  .backlog-row .backlog-title,
+  .backlog-link-row .backlog-title {
+    order: 1;
+    flex: 1 0 100%;
+  }
+
+  .backlog-row .backlog-drag-handle,
+  .backlog-row .backlog-id,
+  .backlog-row .backlog-type-icon,
+  .backlog-row .badge,
+  .backlog-link-row .backlog-link-rel,
+  .backlog-link-row .backlog-type-icon,
+  .backlog-link-row .badge {
+    order: 2;
+  }
+
+  .backlog-row .backlog-row-actions,
+  .backlog-link-row .backlog-link-remove-form {
+    order: 3;
+    margin-left: auto;
+  }
+}
