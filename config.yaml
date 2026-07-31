@@ -124,7 +124,7 @@ sync_jobs:
     schedule: '*-*-* 03:00:00'
     rsync_flags: --archive --delete
     on_failure: notify
-    force_sync_days: 1
+    force_sync_days: 7
     trash:
       enabled: false
   - name: audiobooks-backup-daily
@@ -133,7 +133,7 @@ sync_jobs:
     schedule: '*-*-* 03:00:00'
     rsync_flags: --archive --delete
     on_failure: notify
-    force_sync_days: 1
+    force_sync_days: 7
     trash:
       enabled: true
       path: /mnt/backup_daily/.trash
@@ -144,7 +144,7 @@ sync_jobs:
     schedule: '*-*-* 03:00:00'
     rsync_flags: --archive --delete
     on_failure: notify
-    force_sync_days: 1
+    force_sync_days: 7
     trash:
       enabled: true
       path: /mnt/backup_daily/.trash
@@ -155,7 +155,7 @@ sync_jobs:
     schedule: '*-*-* 03:00:00'
     rsync_flags: --archive --delete
     on_failure: notify
-    force_sync_days: 1
+    force_sync_days: 7
     trash:
       enabled: true
       path: /mnt/backup_daily/.trash
@@ -166,7 +166,7 @@ sync_jobs:
     schedule: '*-*-* 03:00:00'
     rsync_flags: --archive --delete
     on_failure: notify
-    force_sync_days: 1
+    force_sync_days: 7
     trash:
       enabled: true
       path: /mnt/backup_daily/.trash
@@ -177,7 +177,7 @@ sync_jobs:
     schedule: '*-*-* 03:00:00'
     rsync_flags: --archive --delete
     on_failure: notify
-    force_sync_days: 1
+    force_sync_days: 7
     trash:
       enabled: true
       path: /mnt/backup_daily/.trash
@@ -188,7 +188,7 @@ sync_jobs:
     schedule: '*-*-* 03:00:00'
     rsync_flags: --archive --delete
     on_failure: notify
-    force_sync_days: 1
+    force_sync_days: 7
     trash:
       enabled: true
       path: /mnt/backup_daily/.trash
@@ -199,7 +199,7 @@ sync_jobs:
     schedule: '*-*-* 03:00:00'
     rsync_flags: --archive --delete
     on_failure: notify
-    force_sync_days: 1
+    force_sync_days: 7
     trash:
       enabled: true
       path: /mnt/backup_daily/.trash
@@ -210,7 +210,7 @@ sync_jobs:
     schedule: '*-*-* 03:00:00'
     rsync_flags: --archive --delete
     on_failure: notify
-    force_sync_days: 1
+    force_sync_days: 7
     trash:
       enabled: true
       path: /mnt/backup_daily/.trash
