@@ -11,6 +11,7 @@ import subprocess
 import threading
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlparse
 
 import yaml
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
@@ -559,7 +560,10 @@ def build_integrity(cfg: dict) -> dict:
 _backlog_lock = threading.Lock()
 
 _BACKLOG_TYPES    = {"bug", "feature", "improvement"}
-_BACKLOG_STATUSES = {"open", "ready", "done", "deleted"}
+# "closed" = decided against, won't be implemented. Unlike "deleted" it stays
+# visible in the default view: it's a deliberate outcome worth seeing (and
+# worth linking to as a duplicate target), not a mis-click to be hidden away.
+_BACKLOG_STATUSES = {"open", "ready", "done", "closed", "deleted"}
 _BACKLOG_FILTERS  = {"all"} | _BACKLOG_STATUSES
 
 # Link relationship types. Each is stored from the perspective of the item
@@ -595,7 +599,44 @@ def load_backlog() -> dict:
         item.setdefault("description", "")
         item.setdefault("implementation_details", "")
         item.setdefault("links", [])
+        item.setdefault("comments", [])
+        item.setdefault("external_links", [])
     return data
+
+def _next_sub_id(rows: list[dict]) -> int:
+    """Next id for a per-item collection (comments, external links). Ids are
+    scoped to the item, so they only need to be unique within that list."""
+    return max((r.get("id", 0) for r in rows), default=0) + 1
+
+def _safe_url(url: str) -> str | None:
+    """Accept only http(s) URLs. User-supplied strings end up in an href, so
+    schemes like javascript: must never survive — Jinja escapes the attribute
+    value but would happily emit a javascript: URL."""
+    url = (url or "").strip()
+    if not url:
+        return None
+    parsed = urlparse(url)
+    if parsed.scheme in ("http", "https") and parsed.netloc:
+        return url
+    return None
+
+def derive_link_label(url: str) -> str:
+    """Short human label for an external URL when the user didn't supply one.
+    Recognises the GitHub shapes this is mostly used for (commits, PRs,
+    issues) so a pasted commit URL renders as "NASe@7688125" rather than a
+    60-character link."""
+    parsed = urlparse(url)
+    host  = parsed.netloc
+    parts = [p for p in parsed.path.split("/") if p]
+    if host.endswith("github.com") and len(parts) >= 4:
+        owner_repo, kind, ref = parts[1], parts[2], parts[3]
+        if kind in ("commit", "commits"):
+            return f"{owner_repo}@{ref[:7]}"
+        if kind in ("pull", "issues"):
+            return f"{owner_repo}#{ref}"
+    path = parsed.path.rstrip("/")
+    label = f"{host}{path}"
+    return label if len(label) <= 48 else label[:45] + "..."
 
 def save_backlog(data: dict) -> None:
     BACKLOG_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -958,6 +999,64 @@ async def backlog_link_remove(item_id: int, request: Request):
                 inverse = BACKLOG_RELATIONS[rel_type]["inverse"]
                 target["links"] = [l for l in target["links"]
                                    if not (l["type"] == inverse and l["target_id"] == item_id)]
+            save_backlog(data)
+    return RedirectResponse(url=f"/backlog/{item_id}", status_code=303)
+
+@_protected.post("/backlog/{item_id}/comments/add")
+async def backlog_comment_add(item_id: int, request: Request):
+    form = await request.form()
+    text = (form.get("text") or "").strip()
+    with _backlog_lock:
+        data = load_backlog()
+        item = find_backlog_item(data, item_id)
+        if item is not None and text:
+            item["comments"].append({
+                "id":         _next_sub_id(item["comments"]),
+                "text":       text,
+                "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            })
+            save_backlog(data)
+    return RedirectResponse(url=f"/backlog/{item_id}", status_code=303)
+
+@_protected.post("/backlog/{item_id}/comments/remove")
+async def backlog_comment_remove(item_id: int, request: Request):
+    form = await request.form()
+    cid  = form.get("comment_id") or ""
+    with _backlog_lock:
+        data = load_backlog()
+        item = find_backlog_item(data, item_id)
+        if item is not None and cid.isdigit():
+            item["comments"] = [c for c in item["comments"] if c.get("id") != int(cid)]
+            save_backlog(data)
+    return RedirectResponse(url=f"/backlog/{item_id}", status_code=303)
+
+@_protected.post("/backlog/{item_id}/extlinks/add")
+async def backlog_extlink_add(item_id: int, request: Request):
+    form  = await request.form()
+    url   = _safe_url(form.get("url") or "")
+    label = (form.get("label") or "").strip()
+    with _backlog_lock:
+        data = load_backlog()
+        item = find_backlog_item(data, item_id)
+        if item is not None and url:
+            item["external_links"].append({
+                "id":    _next_sub_id(item["external_links"]),
+                "url":   url,
+                "label": label or derive_link_label(url),
+            })
+            save_backlog(data)
+    return RedirectResponse(url=f"/backlog/{item_id}", status_code=303)
+
+@_protected.post("/backlog/{item_id}/extlinks/remove")
+async def backlog_extlink_remove(item_id: int, request: Request):
+    form = await request.form()
+    lid  = form.get("link_id") or ""
+    with _backlog_lock:
+        data = load_backlog()
+        item = find_backlog_item(data, item_id)
+        if item is not None and lid.isdigit():
+            item["external_links"] = [l for l in item["external_links"]
+                                      if l.get("id") != int(lid)]
             save_backlog(data)
     return RedirectResponse(url=f"/backlog/{item_id}", status_code=303)
 

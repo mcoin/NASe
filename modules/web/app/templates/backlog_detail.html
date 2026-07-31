@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Backlog — {{ item.title }}{% endblock %}
+{% block title %}#{{ item.id }} {{ item.title }}{% endblock %}
 
 {% block content %}
 <div class="card">
@@ -11,7 +11,7 @@
         {%- else -%}&#10024;
         {%- endif -%}
       </span>
-      Backlog Item
+      Backlog Item <span class="backlog-id">#{{ item.id }}</span>
     </span>
     <a href="/backlog" class="win-btn" style="text-decoration:none; display:inline-block;">&#8592; Back to Backlog</a>
   </div>
@@ -52,6 +52,7 @@
             <option value="open"    {% if item.status == "open"    %}selected{% endif %}>Open</option>
             <option value="ready"   {% if item.status == "ready"   %}selected{% endif %}>Ready</option>
             <option value="done"    {% if item.status == "done"    %}selected{% endif %}>Done</option>
+            <option value="closed"  {% if item.status == "closed"  %}selected{% endif %}>Closed (won't implement)</option>
             <option value="deleted" {% if item.status == "deleted" %}selected{% endif %}>Deleted</option>
           </select>
         </div>
@@ -87,7 +88,7 @@
 
 <div class="card">
   <div class="card-head">
-    <span>Links</span>
+    <span>Related tickets</span>
   </div>
   <div class="form-body">
 
@@ -107,6 +108,8 @@
         <span class="badge badge-info">ready</span>
         {% elif link.target_status == "done" %}
         <span class="badge badge-ok">done</span>
+        {% elif link.target_status == "closed" %}
+        <span class="badge badge-closed">closed</span>
         {% elif link.target_status == "deleted" %}
         <span class="badge badge-err">deleted</span>
         {% else %}
@@ -139,6 +142,82 @@
       <button type="submit" class="btn-save">+ Link</button>
     </form>
     {% endif %}
+
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-head">
+    <span>External links</span>
+  </div>
+  <div class="form-body">
+
+    {% if item.external_links %}
+    <ul class="backlog-links-list">
+      {% for xl in item.external_links %}
+      <li class="backlog-link-row">
+        <span class="backlog-type-icon">&#128279;</span>
+        <a class="backlog-title" href="{{ xl.url }}" target="_blank" rel="noopener noreferrer"
+           title="{{ xl.url }}">{{ xl.label }}</a>
+        <form method="post" action="/backlog/{{ item.id }}/extlinks/remove"
+              class="backlog-link-remove-form">
+          <input type="hidden" name="link_id" value="{{ xl.id }}">
+          <button type="submit" class="btn-remove" title="Remove this link">&times;</button>
+        </form>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <div class="changes-empty">No external links yet.</div>
+    {% endif %}
+
+    <form method="post" action="/backlog/{{ item.id }}/extlinks/add" class="backlog-link-add">
+      <input class="form-input" type="url" name="url" required
+             placeholder="https://github.com/mcoin/NASe/commit/..." style="flex:1; min-width:240px">
+      <input class="form-input" type="text" name="label"
+             placeholder="Label (optional)" style="max-width:200px">
+      <button type="submit" class="btn-save">+ Add link</button>
+    </form>
+    <span class="form-hint">Commit, PR and issue URLs get a short label automatically.</span>
+
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-head">
+    <span>Comments</span>
+  </div>
+  <div class="form-body">
+
+    {% if item.comments %}
+    <ul class="backlog-comments">
+      {% for c in item.comments %}
+      <li class="backlog-comment">
+        <div class="backlog-comment-head">
+          <span class="backlog-comment-ts">{{ c.created_at }}</span>
+          <form method="post" action="/backlog/{{ item.id }}/comments/remove"
+                class="backlog-link-remove-form">
+            <input type="hidden" name="comment_id" value="{{ c.id }}">
+            <button type="submit" class="btn-remove" title="Delete this comment"
+                    onclick="return confirm('Delete this comment?')">&times;</button>
+          </form>
+        </div>
+        <div class="backlog-comment-text">{{ c.text }}</div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <div class="changes-empty">No comments yet.</div>
+    {% endif %}
+
+    <form method="post" action="/backlog/{{ item.id }}/comments/add">
+      <textarea class="form-input" name="text" rows="3" required
+                style="max-width:520px; resize:vertical;"
+                placeholder="e.g. why this was closed, a decision, a finding..."></textarea>
+      <div style="margin-top:0.6rem">
+        <button type="submit" class="btn-save">+ Add comment</button>
+      </div>
+    </form>
 
   </div>
 </div>

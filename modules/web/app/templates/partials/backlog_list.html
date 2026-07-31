@@ -2,7 +2,7 @@
   <div class="card-head">
     <span>Backlog</span>
     <div class="changes-controls">
-      {% for s, lbl in [("all","All"), ("open","Open"), ("ready","Ready"), ("done","Done"), ("deleted","Deleted")] %}
+      {% for s, lbl in [("all","All"), ("open","Open"), ("ready","Ready"), ("done","Done"), ("closed","Closed"), ("deleted","Deleted")] %}
       <button class="win-btn{% if backlog['status'] == s %} win-btn-active{% endif %}"
               hx-get="/partials/backlog?status={{ s }}&type={{ backlog['type'] }}"
               hx-target="#backlog-card" hx-swap="outerHTML">{{ lbl }}</button>
@@ -33,6 +33,7 @@
     {% for item in backlog['items'] %}
     <li class="backlog-row" draggable="true" data-id="{{ item.id }}">
       <span class="backlog-drag-handle" title="Drag to reorder">&#8942;&#8942;</span>
+      <span class="backlog-id">#{{ item.id }}</span>
       <span class="backlog-type-icon" title="{{ item.type|capitalize }}">
         {%- if item.type == "bug" -%}&#128027;
         {%- elif item.type == "improvement" -%}&#128295;
@@ -44,6 +45,8 @@
       <span class="badge badge-info">ready</span>
       {% elif item.status == "done" %}
       <span class="badge badge-ok">done</span>
+      {% elif item.status == "closed" %}
+      <span class="badge badge-closed">closed</span>
       {% elif item.status == "deleted" %}
       <span class="badge badge-err">deleted</span>
       {% else %}

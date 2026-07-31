@@ -184,6 +184,9 @@ td.mono  { font-family: monospace; font-size: 0.8rem; color: var(--muted); }
 .badge-err   { background: var(--err-bg);  color: var(--err);  }
 .badge-muted { background: var(--border);  color: var(--muted); }
 .badge-info  { background: #dbeafe;         color: #1d4ed8;      }
+/* Terminal "won't implement" state — a heavier grey than badge-muted (open)
+   so it reads as settled rather than merely inactive. */
+.badge-closed { background: #cbd5e1;        color: #334155;      }
 
 /* ── Log section ─────────────────────────────────────────────────────────── */
 .log-selector {
@@ -985,6 +988,52 @@ td.mono  { font-family: monospace; font-size: 0.8rem; color: var(--muted); }
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
+  align-items: center;
+}
+
+.backlog-id {
+  flex-shrink: 0;
+  font-family: monospace;
+  font-size: 0.75rem;
+  color: var(--muted);
+  min-width: 2.2rem;
+}
+
+/* ── Comments ────────────────────────────────────────────────────────────── */
+.backlog-comments {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.backlog-comment {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.5rem 0.75rem;
+  background: var(--bg);
+}
+
+.backlog-comment-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.3rem;
+}
+
+.backlog-comment-ts {
+  font-family: monospace;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+/* pre-wrap so multi-line comments keep their line breaks without needing
+   any markup in the stored text. */
+.backlog-comment-text {
+  font-size: 0.85rem;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .backlog-list {
