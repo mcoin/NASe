@@ -75,6 +75,16 @@ main {
 
 .card-body { padding: 0; }
 
+/* Safety net for wide tables: scroll sideways rather than have the rightmost
+   columns clipped away invisibly by .card's `overflow: hidden` (which exists
+   to keep content inside the rounded corners, so it stays). The stacking
+   breakpoint below is what actually fixes the known cases; this makes sure
+   adding a column can never silently hide data again.
+   Deliberately scoped to card bodies that hold a .responsive-table — a blanket
+   rule on .card-body would also catch .monitoring-body, whose absolutely
+   positioned axis ticks could then raise a stray horizontal scrollbar. */
+.card-body:has(> .responsive-table) { overflow-x: auto; }
+
 /* ── Status grid (services + drives side-by-side, timers full-width) ─────── */
 .status-grid {
   display: grid;
@@ -86,25 +96,36 @@ main {
   grid-column: 1 / -1;
 }
 
-@media (max-width: 640px) {
+/* 900px, not 640px: an iPad Pro 11" in portrait is 834px wide, so at 640px it
+   kept the side-by-side grid and squeezed the 6-column Drives table into ~2/3
+   of the width, where its last column was silently clipped. Keep this in sync
+   with the .responsive-table breakpoint below — both exist to stop that table
+   being narrower than its content. */
+@media (max-width: 900px) {
   .status-grid { grid-template-columns: 1fr; }
 }
 
-/* A narrow phone in landscape (e.g. 852x393 on an iPhone 15) is well past
-   the 640px width breakpoint above, but too short to comfortably fit
+/* A large phone in landscape (e.g. 932x430 on an iPhone 15 Pro Max) is past
+   the 900px width breakpoint above, but too short to comfortably fit
    Services and Drives side by side — stack them there too. Tables keep
-   their normal column layout at this width; only the two-card grid changes. */
+   their normal column layout at this width; only the two-card grid changes.
+   Smaller phones in landscape (e.g. 852x393 on an iPhone 15) are already
+   under 900px, so the width query above covers them. */
 @media (orientation: landscape) and (max-height: 500px) {
   .status-grid { grid-template-columns: 1fr; }
 }
 
-/* ── Responsive tables (stacked cards below 640px) ────────────────────────── */
+/* ── Responsive tables (stacked cards below 900px) ────────────────────────── */
 /* Opt-in via .responsive-table — turns each row into a bordered card with
    "label: value" pairs on one line each (label from data-label), so every
    column stays visible on a phone instead of being pushed off-screen or
    requiring a sideways swipe to discover, without the extra vertical space
-   a label-above-value layout would cost. */
-@media (max-width: 640px) {
+   a label-above-value layout would cost.
+   Breakpoint is 900px (not 640px) so tablets get this too: the 6-column
+   Drives table does not fit an iPad Pro 11" portrait (834px) as a table, and
+   .card's `overflow: hidden` clipped the overflow with no scrollbar, making
+   the Spin column vanish entirely rather than merely be cramped. */
+@media (max-width: 900px) {
   .responsive-table thead { display: none; }
 
   .responsive-table, .responsive-table tbody {
