@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Backlog{% endblock %}
+
+{% block content %}
+  {% include "partials/backlog_list.html" %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // ── Drag-to-reorder ───────────────────────────────────────────────────────
+  // Native HTML5 drag/drop, no library. Bound on load and re-bound after any
+  // htmx swap of #backlog-card, since outerHTML swaps (add/move) replace the
+  // list container the listeners were attached to.
+  var _backlogDragEl = null;
+
+  function initBacklogDnD() {
+    var list = document.getElementById("backlog-sortable");
+    if (!list) return;
+    list.querySelectorAll(".backlog-row").forEach(function(row) {
+      row.addEventListener("dragstart", function() {
+        _backlogDragEl = row;
+        row.classList.add("dragging");
+      });
+      row.addEventListener("dragend", function() {
+        row.classList.remove("dragging");
+        _backlogDragEl = null;
+      });
+      row.addEventListener("dragover", function(e) {
+        e.preventDefault();
+        if (!_backlogDragEl || _backlogDragEl === row) return;
+        var rect   = row.getBoundingClientRect();
+        var before = (e.clientY - rect.top) < rect.height / 2;
+        list.insertBefore(_backlogDragEl, before ? row : row.nextSibling);
+      });
+    });
+    list.addEventListener("drop", function(e) {
+      e.preventDefault();
+      persistBacklogOrder();
+    });
+  }
+
+  function persistBacklogOrder() {
+    var list = document.getElementById("backlog-sortable");
+    if (!list) return;
+    var ids = Array.prototype.map.call(
+      list.querySelectorAll(".backlog-row"),
+      function(row) { return row.dataset.id; }
+    );
+    fetch("/backlog/reorder", {
+      method:  "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body:    "order=" + ids.join(",")
+    });
+  }
+
+  document.addEventListener("DOMContentLoaded", initBacklogDnD);
+  document.body.addEventListener("htmx:afterSwap", function(e) {
+    if (e.detail.target && e.detail.target.id === "backlog-card") initBacklogDnD();
+  });
+</script>
+{% endblock %}

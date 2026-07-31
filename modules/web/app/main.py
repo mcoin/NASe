@@ -8,12 +8,13 @@ import os
 import re
 import secrets
 import subprocess
+import threading
 from datetime import datetime
 from pathlib import Path
 
 import yaml
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -28,6 +29,7 @@ LOG_DIR     = Path("/var/log/nase")
 CENTRAL_LOG = LOG_DIR / "nase.log"
 EVENTS_LOG  = Path(os.environ.get("NASE_EVENTS_LOG", str(STAMP_DIR / "primary-events.log")))
 SPIN_HISTORY_LOG = STAMP_DIR / "spin-history.log"
+BACKLOG_FILE = Path(os.environ.get("NASE_BACKLOG_FILE", str(STAMP_DIR / "backlog.json")))
 
 _CHANGES_PAGE_SIZE = 20
 _WINDOW_SECS  = {"hour": 3600, "day": 86400, "week": 604800, "month": 2592000}
@@ -547,6 +549,108 @@ def build_integrity(cfg: dict) -> dict:
     ]
     return {"enabled": enabled, "drives": drives}
 
+# ── Backlog (feature-request list for NASe itself) ─────────────────────────────
+# Stored as a small JSON file in STAMP_DIR rather than config.yaml — this is a
+# planning list for the app, not a device setting, so it has nothing to do
+# with apply.sh. List order is the backlog priority order (top = highest).
+# A single in-process lock is enough: nase-web.service runs one uvicorn
+# worker, and read-modify-write here is cheap and rare (a person clicking
+# buttons, not a hot path).
+_backlog_lock = threading.Lock()
+
+_BACKLOG_TYPES    = {"bug", "feature", "improvement"}
+_BACKLOG_STATUSES = {"open", "ready", "done", "deleted"}
+_BACKLOG_FILTERS  = {"all"} | _BACKLOG_STATUSES
+
+# Link relationship types. Each is stored from the perspective of the item
+# that owns it ("this item <label> <target>"); adding a link writes the
+# chosen type on this item and the paired inverse type on the target, so
+# both tickets show the relationship without having to scan the whole
+# backlog to find who links to whom.
+BACKLOG_RELATIONS: dict[str, dict[str, str]] = {
+    "relates_to":    {"label": "Relates to",    "inverse": "relates_to"},
+    "causes":        {"label": "Causes",        "inverse": "caused_by"},
+    "caused_by":     {"label": "Caused by",     "inverse": "causes"},
+    "duplicates":    {"label": "Duplicates",    "inverse": "duplicated_by"},
+    "duplicated_by": {"label": "Duplicated by", "inverse": "duplicates"},
+    "blocks":        {"label": "Blocks",        "inverse": "blocked_by"},
+    "blocked_by":    {"label": "Blocked by",    "inverse": "blocks"},
+}
+
+def load_backlog() -> dict:
+    if not BACKLOG_FILE.exists():
+        return {"items": [], "next_id": 1}
+    try:
+        data = json.loads(BACKLOG_FILE.read_text())
+    except (OSError, ValueError):
+        return {"items": [], "next_id": 1}
+    data.setdefault("items", [])
+    data.setdefault("next_id", 1)
+    # Backfill fields added after some items were created — in memory only
+    # (not written back here), so a plain read never has a surprising
+    # side effect on disk.
+    for item in data["items"]:
+        item.setdefault("type", "feature")
+        item.setdefault("status", "open")
+        item.setdefault("description", "")
+        item.setdefault("implementation_details", "")
+        item.setdefault("links", [])
+    return data
+
+def save_backlog(data: dict) -> None:
+    BACKLOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    BACKLOG_FILE.write_text(json.dumps(data, indent=2))
+
+def find_backlog_item(data: dict, item_id: int) -> dict | None:
+    return next((i for i in data["items"] if i["id"] == item_id), None)
+
+def resolve_backlog_links(data: dict, item: dict) -> list[dict]:
+    """item['links'] only stores {type, target_id}; look up each target's
+    current title/type/status for display (and to link to it), skipping any
+    target that's since vanished entirely rather than erroring out."""
+    by_id = {i["id"]: i for i in data["items"]}
+    resolved = []
+    for link in item.get("links", []):
+        target = by_id.get(link.get("target_id"))
+        if target is None:
+            continue
+        resolved.append({
+            "type":          link["type"],
+            "label":         BACKLOG_RELATIONS.get(link["type"], {}).get("label", link["type"]),
+            "target_id":     target["id"],
+            "target_title":  target["title"],
+            "target_type":   target.get("type", "feature"),
+            "target_status": target.get("status", "open"),
+        })
+    return resolved
+
+_BACKLOG_TYPE_FILTERS = {"all"} | _BACKLOG_TYPES
+
+def _backlog_matches(item: dict, status: str, ticket_type: str) -> bool:
+    """Same predicate backlog_view() applies, usable against an in-memory
+    list — needed by backlog_move() below to know what's actually *visible*
+    under the current filters, without a second disk read."""
+    if status == "all":
+        if item.get("status") == "deleted":
+            return False
+    elif item.get("status") != status:
+        return False
+    if ticket_type != "all" and item.get("type") != ticket_type:
+        return False
+    return True
+
+def backlog_view(status: str, ticket_type: str = "all") -> dict:
+    """Backlog items filtered by status and/or type, for the list/filter bars.
+
+    "all" status deliberately excludes "deleted" — a soft-deleted ticket
+    should only reappear when the Deleted filter is picked on purpose, not
+    sit in the default view.
+    """
+    status      = status if status in _BACKLOG_FILTERS else "all"
+    ticket_type = ticket_type if ticket_type in _BACKLOG_TYPE_FILTERS else "all"
+    items = [i for i in load_backlog()["items"] if _backlog_matches(i, status, ticket_type)]
+    return {"items": items, "status": status, "type": ticket_type}
+
 # ── Config sections ────────────────────────────────────────────────────────────
 # Order and display labels for the config editor tabs.
 CONFIG_SECTIONS: list[tuple[str, str]] = [
@@ -724,6 +828,210 @@ async def save_config_section(request: Request, section: str):
 
     return templates.TemplateResponse(request, "partials/save_result.html",
                                       {"success": True, "message": ""})
+
+# ── Backlog routes ───────────────────────────────────────────────────────────────
+@_protected.get("/backlog", response_class=HTMLResponse)
+async def backlog_page(request: Request, status: str = Query("all"),
+                        ticket_type: str = Query("all", alias="type")):
+    cfg = load_config()
+    return templates.TemplateResponse(request, "backlog.html", {
+        "hostname": cfg.get("nas", {}).get("hostname", "nase"),
+        "page":     "backlog",
+        "backlog":  backlog_view(status, ticket_type),
+    })
+
+@_protected.get("/partials/backlog", response_class=HTMLResponse)
+async def partial_backlog(request: Request, status: str = Query("all"),
+                           ticket_type: str = Query("all", alias="type")):
+    return templates.TemplateResponse(request, "partials/backlog_list.html", {
+        "backlog": backlog_view(status, ticket_type),
+    })
+
+@_protected.post("/backlog/add", response_class=HTMLResponse)
+async def backlog_add(request: Request):
+    form  = await request.form()
+    title = (form.get("title") or "").strip()
+    type_ = form.get("type") or "feature"
+    if type_ not in _BACKLOG_TYPES:
+        type_ = "feature"
+    with _backlog_lock:
+        data = load_backlog()
+        if title:
+            data["items"].append({
+                "id":                     data["next_id"],
+                "title":                  title,
+                "type":                   type_,
+                "description":            "",
+                "implementation_details": "",
+                "status":                 "open",
+                "created_at":             datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            })
+            data["next_id"] += 1
+            save_backlog(data)
+    # Always land back on the fully-unfiltered view — a just-added item
+    # could otherwise vanish immediately under an active status or type filter.
+    return templates.TemplateResponse(request, "partials/backlog_list.html", {
+        "backlog": backlog_view("all", "all"),
+    })
+
+# Registered before the /backlog/{item_id} routes below: item_id is typed
+# int, and Starlette matches routes by registration order, so "reorder"
+# would otherwise be swallowed by that route and fail int parsing instead
+# of reaching this one.
+@_protected.post("/backlog/reorder")
+async def backlog_reorder(request: Request):
+    form  = await request.form()
+    order = [int(x) for x in (form.get("order") or "").split(",") if x.strip().isdigit()]
+    with _backlog_lock:
+        data  = load_backlog()
+        by_id = {it["id"]: it for it in data["items"]}
+        order = [i for i in order if i in by_id]
+        # When a status filter is active, `order` only names the ids visible
+        # in that filtered view — not the full list. Splice the reordered
+        # subsequence back into their original slots rather than treating
+        # everything else as "missing" and shoving it to the bottom, which
+        # would silently reshuffle items the user couldn't even see.
+        if len(order) == len(set(order)):
+            order_set = set(order)
+            order_iter = iter(order)
+            data["items"] = [
+                by_id[next(order_iter)] if it["id"] in order_set else it
+                for it in data["items"]
+            ]
+            save_backlog(data)
+    return {"ok": True}
+
+@_protected.get("/backlog/{item_id}", response_class=HTMLResponse)
+async def backlog_detail(request: Request, item_id: int):
+    cfg  = load_config()
+    data = load_backlog()
+    item = find_backlog_item(data, item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Backlog item not found")
+    # Candidates for a new link: every other, non-deleted ticket.
+    link_options = [i for i in data["items"]
+                     if i["id"] != item_id and i.get("status") != "deleted"]
+    return templates.TemplateResponse(request, "backlog_detail.html", {
+        "hostname":     cfg.get("nas", {}).get("hostname", "nase"),
+        "page":         "backlog",
+        "item":         item,
+        "links":        resolve_backlog_links(data, item),
+        "link_options": link_options,
+        "relations":    BACKLOG_RELATIONS,
+    })
+
+@_protected.post("/backlog/{item_id}/links/add")
+async def backlog_link_add(item_id: int, request: Request):
+    form      = await request.form()
+    rel_type  = form.get("rel_type") or ""
+    target_id = form.get("target_id") or ""
+    with _backlog_lock:
+        data = load_backlog()
+        item = find_backlog_item(data, item_id)
+        target = find_backlog_item(data, int(target_id)) if target_id.isdigit() else None
+        if item is not None and target is not None and target["id"] != item_id \
+           and rel_type in BACKLOG_RELATIONS:
+            inverse = BACKLOG_RELATIONS[rel_type]["inverse"]
+            if not any(l["type"] == rel_type and l["target_id"] == target["id"]
+                       for l in item["links"]):
+                item["links"].append({"type": rel_type, "target_id": target["id"]})
+            if not any(l["type"] == inverse and l["target_id"] == item_id
+                       for l in target["links"]):
+                target["links"].append({"type": inverse, "target_id": item_id})
+            save_backlog(data)
+    return RedirectResponse(url=f"/backlog/{item_id}", status_code=303)
+
+@_protected.post("/backlog/{item_id}/links/remove")
+async def backlog_link_remove(item_id: int, request: Request):
+    form      = await request.form()
+    rel_type  = form.get("rel_type") or ""
+    target_id = form.get("target_id") or ""
+    target_id = int(target_id) if target_id.isdigit() else None
+    with _backlog_lock:
+        data = load_backlog()
+        item = find_backlog_item(data, item_id)
+        if item is not None and target_id is not None:
+            item["links"] = [l for l in item["links"]
+                             if not (l["type"] == rel_type and l["target_id"] == target_id)]
+            target = find_backlog_item(data, target_id)
+            if target is not None and rel_type in BACKLOG_RELATIONS:
+                inverse = BACKLOG_RELATIONS[rel_type]["inverse"]
+                target["links"] = [l for l in target["links"]
+                                   if not (l["type"] == inverse and l["target_id"] == item_id)]
+            save_backlog(data)
+    return RedirectResponse(url=f"/backlog/{item_id}", status_code=303)
+
+@_protected.post("/backlog/{item_id}")
+async def backlog_update(request: Request, item_id: int):
+    form   = await request.form()
+    title  = (form.get("title") or "").strip()
+    type_  = form.get("type") or "feature"
+    if type_ not in _BACKLOG_TYPES:
+        type_ = "feature"
+    status = form.get("status") or "open"
+    if status not in _BACKLOG_STATUSES:
+        status = "open"
+    with _backlog_lock:
+        data = load_backlog()
+        item = find_backlog_item(data, item_id)
+        if item is None:
+            raise HTTPException(status_code=404, detail="Backlog item not found")
+        if title:
+            item["title"] = title
+        item["type"] = type_
+        item["description"] = form.get("description") or ""
+        item["implementation_details"] = form.get("implementation_details") or ""
+        item["status"] = status
+        save_backlog(data)
+    return RedirectResponse(url="/backlog", status_code=303)
+
+@_protected.post("/backlog/{item_id}/delete")
+async def backlog_delete(item_id: int):
+    # Soft delete: flip the status rather than erase the record, so a
+    # mis-click is recoverable (reopen the item, change status back) and
+    # matches the "Deleted" status being just another workflow state that
+    # happens to be hidden by default (see backlog_view).
+    with _backlog_lock:
+        data = load_backlog()
+        item = find_backlog_item(data, item_id)
+        if item is not None:
+            item["status"] = "deleted"
+            save_backlog(data)
+    return RedirectResponse(url="/backlog", status_code=303)
+
+@_protected.post("/backlog/{item_id}/move", response_class=HTMLResponse)
+async def backlog_move(request: Request, item_id: int, direction: str = Query("bottom"),
+                        status: str = Query("all"), ticket_type: str = Query("all", alias="type")):
+    with _backlog_lock:
+        data  = load_backlog()
+        items = data["items"]
+        idx   = next((i for i, it in enumerate(items) if it["id"] == item_id), None)
+        if idx is not None:
+            if direction == "top":
+                items.insert(0, items.pop(idx))
+            elif direction == "bottom":
+                items.append(items.pop(idx))
+            elif direction in ("up", "down"):
+                # "Up"/"down" move by one *visible* slot under the active
+                # filters, not one slot in the full list — otherwise, if the
+                # adjacent full-list item happens to be filtered out, the
+                # button would look like it did nothing.
+                visible = [it for it in items if _backlog_matches(it, status, ticket_type)]
+                vis_idx = next((i for i, it in enumerate(visible) if it["id"] == item_id), None)
+                if vis_idx is not None:
+                    neighbor_id = None
+                    if direction == "up" and vis_idx > 0:
+                        neighbor_id = visible[vis_idx - 1]["id"]
+                    elif direction == "down" and vis_idx < len(visible) - 1:
+                        neighbor_id = visible[vis_idx + 1]["id"]
+                    if neighbor_id is not None:
+                        item = items.pop(idx)
+                        neighbor_idx = next(i for i, it in enumerate(items) if it["id"] == neighbor_id)
+                        items.insert(neighbor_idx if direction == "up" else neighbor_idx + 1, item)
+            save_backlog(data)
+    return templates.TemplateResponse(request, "partials/backlog_list.html", {
+        "backlog": backlog_view(status, ticket_type),
+    })
 
 # ── Apply ──────────────────────────────────────────────────────────────────────
 _apply_lock = asyncio.Lock()

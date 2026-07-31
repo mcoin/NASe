@@ -179,9 +179,11 @@ td.mono  { font-family: monospace; font-size: 0.8rem; color: var(--muted); }
   white-space: nowrap;
 }
 
-.badge-ok   { background: var(--ok-bg);   color: var(--ok);   }
-.badge-warn { background: var(--warn-bg); color: var(--warn); }
-.badge-err  { background: var(--err-bg);  color: var(--err);  }
+.badge-ok    { background: var(--ok-bg);   color: var(--ok);   }
+.badge-warn  { background: var(--warn-bg); color: var(--warn); }
+.badge-err   { background: var(--err-bg);  color: var(--err);  }
+.badge-muted { background: var(--border);  color: var(--muted); }
+.badge-info  { background: #dbeafe;         color: #1d4ed8;      }
 
 /* ── Log section ─────────────────────────────────────────────────────────── */
 .log-selector {
@@ -919,4 +921,111 @@ td.mono  { font-family: monospace; font-size: 0.8rem; color: var(--muted); }
 
 .wake-event-reason {
   color: var(--muted);
+}
+
+/* ── Backlog ─────────────────────────────────────────────────────────────── */
+.backlog-add {
+  display: flex;
+  gap: 0.6rem;
+  padding: 1rem 1rem 0;
+}
+
+.backlog-add .form-input { max-width: none; flex: 1; }
+
+.backlog-add .backlog-type-select { flex: 0 0 auto; width: auto; max-width: 150px; }
+
+.backlog-type-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.75rem 1rem 0;
+}
+
+.backlog-type-icon {
+  flex-shrink: 0;
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+.backlog-detail-head { display: inline-flex; align-items: center; gap: 0.4rem; }
+
+.backlog-links-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-bottom: 1rem;
+}
+
+.backlog-link-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.backlog-link-rel {
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  color: var(--muted);
+  min-width: 90px;
+}
+
+.backlog-link-remove-form { margin-left: auto; }
+
+.backlog-link-remove-form .btn-remove {
+  padding: 0.1rem 0.5rem;
+  line-height: 1.2;
+}
+
+.backlog-link-add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.backlog-list {
+  list-style: none;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.backlog-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+  cursor: grab;
+}
+
+.backlog-row.dragging { opacity: 0.4; }
+
+.backlog-drag-handle {
+  color: var(--border);
+  font-size: 0.9rem;
+  line-height: 1;
+  user-select: none;
+}
+
+.backlog-title {
+  flex: 1;
+  color: var(--text);
+  text-decoration: none;
+  font-size: 0.85rem;
+}
+
+.backlog-title:hover { text-decoration: underline; }
+
+.backlog-row-actions {
+  display: flex;
+  gap: 0.3rem;
+  flex-shrink: 0;
 }

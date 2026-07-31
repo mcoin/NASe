@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block title %}Backlog — {{ item.title }}{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div class="card-head">
+    <span class="backlog-detail-head">
+      <span class="backlog-type-icon" title="{{ item.type|capitalize }}">
+        {%- if item.type == "bug" -%}&#128027;
+        {%- elif item.type == "improvement" -%}&#128295;
+        {%- else -%}&#10024;
+        {%- endif -%}
+      </span>
+      Backlog Item
+    </span>
+    <a href="/backlog" class="win-btn" style="text-decoration:none; display:inline-block;">&#8592; Back to Backlog</a>
+  </div>
+
+  <form method="post" action="/backlog/{{ item.id }}">
+    <div class="form-body">
+      <div class="form-row">
+        <label class="form-label" for="field-title">Title</label>
+        <div class="form-field">
+          <input class="form-input" id="field-title" name="title" type="text"
+                 value="{{ item.title }}" required style="max-width:520px">
+        </div>
+      </div>
+
+      <div class="form-row">
+        <label class="form-label" for="field-type">Type</label>
+        <div class="form-field">
+          <select class="form-input form-select" id="field-type" name="type" style="max-width:160px">
+            <option value="feature"     {% if item.type == "feature"     %}selected{% endif %}>Feature</option>
+            <option value="bug"         {% if item.type == "bug"         %}selected{% endif %}>Bug</option>
+            <option value="improvement" {% if item.type == "improvement" %}selected{% endif %}>Improvement</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <label class="form-label" for="field-description">Description</label>
+        <div class="form-field">
+          <textarea class="form-input" id="field-description" name="description" rows="6"
+                    style="max-width:520px; resize:vertical;">{{ item.description }}</textarea>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <label class="form-label" for="field-status">Status</label>
+        <div class="form-field">
+          <select class="form-input form-select" id="field-status" name="status" style="max-width:160px">
+            <option value="open"    {% if item.status == "open"    %}selected{% endif %}>Open</option>
+            <option value="ready"   {% if item.status == "ready"   %}selected{% endif %}>Ready</option>
+            <option value="done"    {% if item.status == "done"    %}selected{% endif %}>Done</option>
+            <option value="deleted" {% if item.status == "deleted" %}selected{% endif %}>Deleted</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <label class="form-label">Date added</label>
+        <div class="form-field">
+          <span class="form-hint">{{ item.created_at }}</span>
+        </div>
+      </div>
+
+      <div class="form-subsection">
+        <p class="form-section-head">Implementation details</p>
+        <div class="form-row">
+          <label class="form-label" for="field-impl">Notes</label>
+          <div class="form-field">
+            <textarea class="form-input" id="field-impl" name="implementation_details" rows="6"
+                      style="max-width:520px; resize:vertical;"
+                      placeholder="Approach, affected files, open questions...">{{ item.implementation_details }}</textarea>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="editor-footer">
+      <button type="submit" class="btn-save">Save</button>
+      <button type="submit" formaction="/backlog/{{ item.id }}/delete" class="btn-remove"
+              onclick="return confirm('Delete this backlog item? It will be hidden from the main list, not permanently erased.')">Delete</button>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <div class="card-head">
+    <span>Links</span>
+  </div>
+  <div class="form-body">
+
+    {% if links %}
+    <ul class="backlog-links-list">
+      {% for link in links %}
+      <li class="backlog-link-row">
+        <span class="backlog-link-rel">{{ link.label }}</span>
+        <span class="backlog-type-icon" title="{{ link.target_type|capitalize }}">
+          {%- if link.target_type == "bug" -%}&#128027;
+          {%- elif link.target_type == "improvement" -%}&#128295;
+          {%- else -%}&#10024;
+          {%- endif -%}
+        </span>
+        <a class="backlog-title" href="/backlog/{{ link.target_id }}">{{ link.target_title }}</a>
+        {% if link.target_status == "ready" %}
+        <span class="badge badge-info">ready</span>
+        {% elif link.target_status == "done" %}
+        <span class="badge badge-ok">done</span>
+        {% elif link.target_status == "deleted" %}
+        <span class="badge badge-err">deleted</span>
+        {% else %}
+        <span class="badge badge-muted">open</span>
+        {% endif %}
+        <form method="post" action="/backlog/{{ item.id }}/links/remove" class="backlog-link-remove-form">
+          <input type="hidden" name="rel_type" value="{{ link.type }}">
+          <input type="hidden" name="target_id" value="{{ link.target_id }}">
+          <button type="submit" class="btn-remove" title="Remove this link">&times;</button>
+        </form>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <div class="changes-empty">No links yet.</div>
+    {% endif %}
+
+    {% if link_options %}
+    <form method="post" action="/backlog/{{ item.id }}/links/add" class="backlog-link-add">
+      <select class="form-input form-select" name="rel_type" style="max-width:150px">
+        {% for key, rel in relations.items() %}
+        <option value="{{ key }}">{{ rel.label }}</option>
+        {% endfor %}
+      </select>
+      <select class="form-input form-select" name="target_id" style="max-width:340px">
+        {% for opt in link_options %}
+        <option value="{{ opt.id }}">#{{ opt.id }} — {{ opt.title }}</option>
+        {% endfor %}
+      </select>
+      <button type="submit" class="btn-save">+ Link</button>
+    </form>
+    {% endif %}
+
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,78 @@
+<div class="card" id="backlog-card">
+  <div class="card-head">
+    <span>Backlog</span>
+    <div class="changes-controls">
+      {% for s, lbl in [("all","All"), ("open","Open"), ("ready","Ready"), ("done","Done"), ("deleted","Deleted")] %}
+      <button class="win-btn{% if backlog['status'] == s %} win-btn-active{% endif %}"
+              hx-get="/partials/backlog?status={{ s }}&type={{ backlog['type'] }}"
+              hx-target="#backlog-card" hx-swap="outerHTML">{{ lbl }}</button>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="backlog-type-filter">
+    {% for t, lbl in [("all","All types"), ("bug","&#128027; Bug"), ("feature","&#10024; Feature"), ("improvement","&#128295; Improvement")] %}
+    <button class="win-btn{% if backlog['type'] == t %} win-btn-active{% endif %}"
+            hx-get="/partials/backlog?status={{ backlog['status'] }}&type={{ t }}"
+            hx-target="#backlog-card" hx-swap="outerHTML">{{ lbl|safe }}</button>
+    {% endfor %}
+  </div>
+
+  <form class="backlog-add" hx-post="/backlog/add" hx-target="#backlog-card" hx-swap="outerHTML">
+    <input class="form-input" type="text" name="title" placeholder="New backlog item..." required>
+    <select class="form-input form-select backlog-type-select" name="type">
+      <option value="feature">Feature</option>
+      <option value="bug">Bug</option>
+      <option value="improvement">Improvement</option>
+    </select>
+    <button type="submit" class="btn-save">+ Add</button>
+  </form>
+
+  {% if backlog['items'] %}
+  <ul class="backlog-list" id="backlog-sortable">
+    {% for item in backlog['items'] %}
+    <li class="backlog-row" draggable="true" data-id="{{ item.id }}">
+      <span class="backlog-drag-handle" title="Drag to reorder">&#8942;&#8942;</span>
+      <span class="backlog-type-icon" title="{{ item.type|capitalize }}">
+        {%- if item.type == "bug" -%}&#128027;
+        {%- elif item.type == "improvement" -%}&#128295;
+        {%- else -%}&#10024;
+        {%- endif -%}
+      </span>
+      <a class="backlog-title" href="/backlog/{{ item.id }}">{{ item.title }}</a>
+      {% if item.status == "ready" %}
+      <span class="badge badge-info">ready</span>
+      {% elif item.status == "done" %}
+      <span class="badge badge-ok">done</span>
+      {% elif item.status == "deleted" %}
+      <span class="badge badge-err">deleted</span>
+      {% else %}
+      <span class="badge badge-muted">open</span>
+      {% endif %}
+      <span class="backlog-row-actions">
+        <button type="button" class="pg-btn" title="Move to top"
+                hx-post="/backlog/{{ item.id }}/move?direction=top&amp;status={{ backlog['status'] }}&amp;type={{ backlog['type'] }}"
+                hx-target="#backlog-card" hx-swap="outerHTML">&#10514;</button>
+        <button type="button" class="pg-btn" title="Move up"
+                hx-post="/backlog/{{ item.id }}/move?direction=up&amp;status={{ backlog['status'] }}&amp;type={{ backlog['type'] }}"
+                hx-target="#backlog-card" hx-swap="outerHTML">&#8593;</button>
+        <button type="button" class="pg-btn" title="Move down"
+                hx-post="/backlog/{{ item.id }}/move?direction=down&amp;status={{ backlog['status'] }}&amp;type={{ backlog['type'] }}"
+                hx-target="#backlog-card" hx-swap="outerHTML">&#8595;</button>
+        <button type="button" class="pg-btn" title="Move to bottom"
+                hx-post="/backlog/{{ item.id }}/move?direction=bottom&amp;status={{ backlog['status'] }}&amp;type={{ backlog['type'] }}"
+                hx-target="#backlog-card" hx-swap="outerHTML">&#10515;</button>
+      </span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <div class="changes-empty">
+    {% if backlog['status'] == 'all' and backlog['type'] == 'all' %}
+    No backlog items yet — add one above.
+    {% else %}
+    No matching backlog items.
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
