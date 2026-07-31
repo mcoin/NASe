@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}{{ heading }}{% endblock %}
+
+{% block content %}
+<div class="card error-card">
+  <div class="card-head">
+    <span>{{ heading }}</span>
+    <span class="error-status">{{ status }}</span>
+  </div>
+  <div class="form-body">
+    <p class="error-message">{{ message }}</p>
+    {% if hint %}<pre class="error-hint">{{ hint }}</pre>{% endif %}
+    <div class="error-actions">
+      {% if status == 401 %}
+      <a class="btn-save" href="{{ retry_path }}">Try again</a>
+      {% endif %}
+      <a class="win-btn" href="/">Back to Dashboard</a>
+    </div>
+  </div>
+</div>
+{% endblock %}

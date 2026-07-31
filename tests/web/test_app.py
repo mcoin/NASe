@@ -586,3 +586,91 @@ def test_backlog_empty_state_distinguishes_no_items_from_no_matches(client, auth
     write_backlog(backlog_file, [(1, "a done one", "done", "bug")])
     r = client.get("/backlog", headers=auth_headers)
     assert "No matching backlog items" in r.text
+
+
+# ── Error pages ─────────────────────────────────────────────────────────────────
+
+HTML_ACCEPT = {"Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"}
+
+
+def test_unauthenticated_browser_gets_styled_page_not_json(client):
+    """The bug: cancelling the Basic-auth dialog left a bare
+    {"detail":"Not authenticated"} on an otherwise empty page."""
+    r = client.get("/config", headers=HTML_ACCEPT)
+    assert r.status_code == 401
+    assert "text/html" in r.headers["content-type"]
+    assert "Sign-in required" in r.text
+    assert "Back to Dashboard" in r.text
+    assert '{"detail"' not in r.text
+
+
+def test_unauthenticated_page_keeps_www_authenticate_header(client):
+    """Without this header browsers stop offering the login dialog, so the
+    friendlier page would lock the user out of signing in at all."""
+    r = client.get("/config", headers=HTML_ACCEPT)
+    assert r.headers["www-authenticate"] == 'Basic realm="NASe"'
+
+
+def test_unauthenticated_page_offers_retry_to_the_same_path(client):
+    r = client.get("/backlog", headers=HTML_ACCEPT)
+    assert 'href="/backlog"' in r.text
+
+
+def test_unauthenticated_json_client_still_gets_json(client):
+    r = client.get("/config", headers={"Accept": "application/json"})
+    assert r.status_code == 401
+    assert r.json() == {"detail": "Not authenticated"}
+    assert r.headers["www-authenticate"] == 'Basic realm="NASe"'
+
+
+def test_unauthenticated_sse_client_still_gets_json(client):
+    """EventSource must not be handed an HTML document."""
+    r = client.get("/apply", headers={"Accept": "text/event-stream"})
+    assert r.status_code == 401
+    assert "application/json" in r.headers["content-type"]
+
+
+def test_unauthenticated_htmx_request_gets_fragment_not_document(client):
+    r = client.get("/partials/backlog", headers={**HTML_ACCEPT, "HX-Request": "true"})
+    assert r.status_code == 401
+    assert "Sign-in required" in r.text
+    assert "<!DOCTYPE" not in r.text
+    assert "<nav" not in r.text
+
+
+def test_missing_web_password_gets_its_own_message(client, monkeypatch, auth_headers):
+    """A server with no WEB_PASSWORD is misconfigured, not a wrong password —
+    telling the user to try again would be a dead end."""
+    import modules.web.app.main as m
+    monkeypatch.setattr(m, "_WEB_PASSWORD", "")
+    r = client.get("/config", headers={**HTML_ACCEPT, **auth_headers})
+    assert r.status_code == 401
+    assert "not configured" in r.text
+    assert "WEB_PASSWORD" in r.text
+    assert "Sign-in required" not in r.text
+
+
+def test_error_page_renders_without_a_readable_config(client, monkeypatch):
+    """The page chrome needs a hostname from config.yaml; an unreadable config
+    is itself a plausible cause of an error, so it must not blow up here."""
+    import modules.web.app.main as m
+    monkeypatch.setattr(m, "CONFIG_FILE", "/nonexistent/config.yaml")
+    r = client.get("/config", headers=HTML_ACCEPT)
+    assert r.status_code == 401
+    assert "Sign-in required" in r.text
+
+
+def test_missing_backlog_item_gets_styled_404(client, auth_headers, backlog_file):
+    write_backlog(backlog_file, [(1, "the only one", "open", "bug")])
+    r = client.get("/backlog/99", headers={**HTML_ACCEPT, **auth_headers})
+    assert r.status_code == 404
+    assert "Not found" in r.text
+    assert "Backlog item not found" in r.text
+
+
+def test_unknown_url_gets_styled_404(client, auth_headers):
+    """Starlette raises its own HTTPException for unmatched routes — the
+    handler is registered on that base class so these are covered too."""
+    r = client.get("/no/such/page", headers={**HTML_ACCEPT, **auth_headers})
+    assert r.status_code == 404
+    assert "Back to Dashboard" in r.text

@@ -15,11 +15,13 @@ from urllib.parse import urlparse
 
 import yaml
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import (HTMLResponse, JSONResponse, RedirectResponse,
+                               StreamingResponse)
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from ruamel.yaml import YAML as RuamelYAML
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
 APP_DIR     = Path(__file__).parent
@@ -41,10 +43,15 @@ _WEB_USERNAME = os.environ.get("WEB_USERNAME", "nase")
 _WEB_PASSWORD = os.environ.get("WEB_PASSWORD", "")
 _http_basic   = HTTPBasic(realm="NASe")
 
+# Marks the "server has no password configured" 401 apart from the ordinary
+# "wrong password" one, so the error page can tell the two apart: only the
+# first is something the user can fix, and it needs different advice.
+_AUTH_UNCONFIGURED = "WEB_PASSWORD not set in .env"
+
 def _require_auth(credentials: HTTPBasicCredentials = Depends(_http_basic)):
     if not _WEB_PASSWORD:
         raise HTTPException(status_code=401,
-                            detail="WEB_PASSWORD not set in .env",
+                            detail=_AUTH_UNCONFIGURED,
                             headers={"WWW-Authenticate": 'Basic realm="NASe"'})
     ok = (
         secrets.compare_digest(credentials.username.encode(), _WEB_USERNAME.encode())
@@ -67,6 +74,69 @@ templates.env.globals["css_v"] = _css_v
 
 # Router whose routes all require authentication (config editing + apply).
 _protected = APIRouter(dependencies=[Depends(_require_auth)])
+
+# ── Error pages ────────────────────────────────────────────────────────────────
+# By default an HTTPException renders as bare JSON, so cancelling the browser's
+# Basic-auth dialog leaves the user staring at {"detail":"Not authenticated"} on
+# a blank page. Serve humans a styled page instead, while machine clients — and
+# the SSE streams, which must keep speaking event-stream — still get JSON.
+
+def _error_text(status: int, detail: str) -> tuple[str, str, str | None]:
+    """(heading, message, hint) for an error response. `hint` is a command or
+    action the reader can act on, and is rendered as preformatted text."""
+    if status == 401:
+        if detail == _AUTH_UNCONFIGURED:
+            return ("Dashboard password not configured",
+                    "This dashboard has no password set, so it cannot let anyone "
+                    "into the protected tabs.",
+                    "Set WEB_PASSWORD in /opt/nase/.env, then run:\n"
+                    "sudo systemctl restart nase-web")
+        return ("Sign-in required",
+                "The Config and Backlog tabs are password-protected. The sign-in "
+                "was cancelled, or the username or password was wrong.",
+                None)
+    if status == 403:
+        return ("Not allowed", detail or "You do not have access to this page.", None)
+    if status == 404:
+        return ("Not found", detail or "That page does not exist.", None)
+    return (f"Error {status}", detail or "Something went wrong.", None)
+
+def _hostname() -> str:
+    """Hostname for the page chrome. Error pages must render even when the
+    config file is missing or unparseable — which is itself a likely reason
+    for an error — so fall back rather than raise from an error handler."""
+    try:
+        return load_config().get("nas", {}).get("hostname", "nase")
+    except Exception:
+        return "nase"
+
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    # Registered on Starlette's HTTPException, not FastAPI's subclass, so it
+    # also covers the 404s Starlette raises for unmatched routes.
+    detail  = str(exc.detail) if exc.detail else ""
+    headers = getattr(exc, "headers", None)
+    # Keep WWW-Authenticate on 401s: drop it and browsers stop offering the
+    # login dialog altogether, so the user could never sign in again.
+    heading, message, hint = _error_text(exc.status_code, detail)
+
+    if request.headers.get("hx-request"):
+        # A partial swap must not inject a whole document into a card.
+        return templates.TemplateResponse(
+            request, "partials/error_inline.html",
+            {"heading": heading, "message": message},
+            status_code=exc.status_code, headers=headers)
+
+    # EventSource sends "text/event-stream" and API clients "application/json";
+    # neither accepts HTML, so both fall through to the JSON default below.
+    if "text/html" in request.headers.get("accept", ""):
+        return templates.TemplateResponse(
+            request, "error.html",
+            {"hostname": _hostname(), "status": exc.status_code, "heading": heading,
+             "message": message, "hint": hint, "retry_path": request.url.path},
+            status_code=exc.status_code, headers=headers)
+
+    return JSONResponse({"detail": detail}, status_code=exc.status_code, headers=headers)
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 def load_config() -> dict:

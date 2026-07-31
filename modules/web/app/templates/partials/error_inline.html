@@ -1,0 +1,6 @@
+{# Swapped into a card when an HTMX request fails, in place of the full
+   error page — a whole document nested inside a card would break the layout. #}
+<div class="changes-empty error-inline">
+  <strong>{{ heading }}</strong><br>
+  {{ message }}
+</div>

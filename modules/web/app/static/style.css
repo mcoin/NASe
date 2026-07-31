@@ -713,6 +713,46 @@ td.mono  { font-family: monospace; font-size: 0.8rem; color: var(--muted); }
   text-align: center;
 }
 
+/* ── Error page ──────────────────────────────────────────────────────────── */
+.error-card { max-width: 640px; }
+
+.error-status {
+  font-family: monospace;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.error-message {
+  margin: 0 0 1rem;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.error-hint {
+  margin: 0 0 1rem;
+  padding: 0.7rem 0.9rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 0.8rem;
+  /* The hint holds shell commands: wrap rather than scroll, so a narrow phone
+     shows the whole command instead of hiding its tail off-screen. */
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.error-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+/* .btn-save and .win-btn are styled for <button>; these are links. */
+.error-actions a {
+  display: inline-block;
+  text-decoration: none;
+}
+
 /* ── Integrity page ──────────────────────────────────────────────────────── */
 #integrity-wrap {
   display: flex;
