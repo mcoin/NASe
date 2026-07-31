@@ -587,6 +587,7 @@ td.mono  { font-family: monospace; font-size: 0.8rem; color: var(--muted); }
 /* ── File Changes widget ─────────────────────────────────────────────────── */
 .changes-controls {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.3rem;
 }

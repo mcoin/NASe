@@ -2,8 +2,11 @@
   <div class="card-head">
     <span>Backlog</span>
     <div class="changes-controls">
-      {% for s, lbl in [("all","All"), ("open","Open"), ("ready","Ready"), ("done","Done"), ("closed","Closed"), ("deleted","Deleted")] %}
+      {% for s, lbl, tip in [("active","Active","Open and ready items"), ("all","All","Everything except deleted"),
+                             ("open","Open",""), ("ready","Ready",""), ("done","Done",""),
+                             ("closed","Closed",""), ("deleted","Deleted","")] %}
       <button class="win-btn{% if backlog['status'] == s %} win-btn-active{% endif %}"
+              {% if tip %}title="{{ tip }}"{% endif %}
               hx-get="/partials/backlog?status={{ s }}&type={{ backlog['type'] }}"
               hx-target="#backlog-card" hx-swap="outerHTML">{{ lbl }}</button>
       {% endfor %}
@@ -71,7 +74,7 @@
   </ul>
   {% else %}
   <div class="changes-empty">
-    {% if backlog['status'] == 'all' and backlog['type'] == 'all' %}
+    {% if backlog['total'] == 0 %}
     No backlog items yet — add one above.
     {% else %}
     No matching backlog items.

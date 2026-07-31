@@ -1,12 +1,13 @@
 """Tests for modules/web/app/main.py."""
 import base64
+import json
 import time
 from unittest.mock import patch
 
 import pytest
 import yaml
 
-from conftest import make_integrity_cache
+from conftest import make_integrity_cache, write_backlog
 
 
 # ── read_log ───────────────────────────────────────────────────────────────────
@@ -479,3 +480,109 @@ def test_partial_integrity_matches_full_page_content(integrity_client):
     partial = integrity_client.get("/partials/integrity").text
     assert "drive1" in full
     assert "drive1" in partial
+
+
+# ── Backlog filters ─────────────────────────────────────────────────────────────
+
+SAMPLE_BACKLOG = [
+    (1, "an open one",    "open",    "bug"),
+    (2, "a ready one",    "ready",   "feature"),
+    (3, "a done one",     "done",    "feature"),
+    (4, "a closed one",   "closed",  "improvement"),
+    (5, "a deleted one",  "deleted", "bug"),
+]
+
+
+def _titles(view):
+    return [i["title"] for i in view["items"]]
+
+
+def test_backlog_view_active_is_open_plus_ready(backlog_file, client):
+    import modules.web.app.main as m
+    write_backlog(backlog_file, SAMPLE_BACKLOG)
+    assert _titles(m.backlog_view("active", "all")) == ["an open one", "a ready one"]
+
+
+def test_backlog_view_active_combines_with_type_filter(backlog_file, client):
+    import modules.web.app.main as m
+    write_backlog(backlog_file, SAMPLE_BACKLOG)
+    assert _titles(m.backlog_view("active", "bug")) == ["an open one"]
+
+
+def test_backlog_view_all_still_excludes_deleted_only(backlog_file, client):
+    import modules.web.app.main as m
+    write_backlog(backlog_file, SAMPLE_BACKLOG)
+    assert _titles(m.backlog_view("all", "all")) == [
+        "an open one", "a ready one", "a done one", "a closed one"]
+
+
+def test_backlog_view_unknown_status_falls_back_to_default(backlog_file, client):
+    import modules.web.app.main as m
+    write_backlog(backlog_file, SAMPLE_BACKLOG)
+    view = m.backlog_view("bogus", "all")
+    assert view["status"] == "active"
+    assert _titles(view) == ["an open one", "a ready one"]
+
+
+def test_backlog_view_total_counts_undeleted_regardless_of_filter(backlog_file, client):
+    import modules.web.app.main as m
+    write_backlog(backlog_file, SAMPLE_BACKLOG)
+    assert m.backlog_view("closed", "all")["total"] == 4
+
+
+def test_backlog_page_defaults_to_active(client, auth_headers, backlog_file):
+    write_backlog(backlog_file, SAMPLE_BACKLOG)
+    r = client.get("/backlog", headers=auth_headers)
+    assert r.status_code == 200
+    assert "an open one" in r.text
+    assert "a ready one" in r.text
+    assert "a done one" not in r.text
+    assert "a closed one" not in r.text
+
+
+def test_backlog_page_explicit_status_overrides_default(client, auth_headers, backlog_file):
+    write_backlog(backlog_file, SAMPLE_BACKLOG)
+    r = client.get("/backlog?status=done", headers=auth_headers)
+    assert "a done one" in r.text
+    assert "an open one" not in r.text
+
+
+def test_partial_backlog_defaults_to_active(client, auth_headers, backlog_file):
+    write_backlog(backlog_file, SAMPLE_BACKLOG)
+    r = client.get("/partials/backlog", headers=auth_headers)
+    assert "a ready one" in r.text
+    assert "a done one" not in r.text
+
+
+def test_backlog_add_lands_on_view_showing_new_item(client, auth_headers, backlog_file):
+    write_backlog(backlog_file, SAMPLE_BACKLOG)
+    r = client.post("/backlog/add", headers=auth_headers,
+                    data={"title": "brand new", "type": "bug"})
+    assert r.status_code == 200
+    # New items are "open", so the default (active) view must show it.
+    assert "brand new" in r.text
+
+
+def test_backlog_move_up_uses_visible_order_under_active_filter(client, auth_headers, backlog_file):
+    # Full-list order: open(1), done(3), ready(2). Under "active", 2 is
+    # directly below 1, so moving it up must put it above 1 in the stored
+    # list — not merely swap it with the invisible done item.
+    write_backlog(backlog_file, [
+        (1, "an open one", "open",  "bug"),
+        (3, "a done one",  "done",  "feature"),
+        (2, "a ready one", "ready", "feature"),
+    ])
+    r = client.post("/backlog/2/move?direction=up&status=active&type=all",
+                    headers=auth_headers)
+    assert r.status_code == 200
+    stored = json.loads(backlog_file.read_text())["items"]
+    assert [i["id"] for i in stored] == [2, 1, 3]
+
+
+def test_backlog_empty_state_distinguishes_no_items_from_no_matches(client, auth_headers, backlog_file):
+    write_backlog(backlog_file, [])
+    assert "No backlog items yet" in client.get("/backlog", headers=auth_headers).text
+
+    write_backlog(backlog_file, [(1, "a done one", "done", "bug")])
+    r = client.get("/backlog", headers=auth_headers)
+    assert "No matching backlog items" in r.text

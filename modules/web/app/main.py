@@ -564,7 +564,13 @@ _BACKLOG_TYPES    = {"bug", "feature", "improvement"}
 # visible in the default view: it's a deliberate outcome worth seeing (and
 # worth linking to as a duplicate target), not a mis-click to be hidden away.
 _BACKLOG_STATUSES = {"open", "ready", "done", "closed", "deleted"}
-_BACKLOG_FILTERS  = {"all"} | _BACKLOG_STATUSES
+# "active" is a pseudo-status: it spans open + ready, i.e. everything still
+# waiting to be worked on. It's only ever a filter, never stored on an item.
+_BACKLOG_ACTIVE_STATUSES = {"open", "ready"}
+_BACKLOG_FILTERS  = {"all", "active"} | _BACKLOG_STATUSES
+# Opening the Backlog tab should show the work that's left, not a wall of
+# finished and abandoned tickets, so "active" — not "all" — is the default.
+_BACKLOG_DEFAULT_FILTER = "active"
 
 # Link relationship types. Each is stored from the perspective of the item
 # that owns it ("this item <label> <target>"); adding a link writes the
@@ -674,11 +680,22 @@ def _backlog_matches(item: dict, status: str, ticket_type: str) -> bool:
     if status == "all":
         if item.get("status") == "deleted":
             return False
+    elif status == "active":
+        if item.get("status") not in _BACKLOG_ACTIVE_STATUSES:
+            return False
     elif item.get("status") != status:
         return False
     if ticket_type != "all" and item.get("type") != ticket_type:
         return False
     return True
+
+def normalize_backlog_filters(status: str, ticket_type: str) -> tuple[str, str]:
+    """Coerce user-supplied filter values to known ones. Callers that reason
+    about visibility themselves (backlog_move) must normalize the same way
+    backlog_view does, or they'd compute "what's visible" from a filter the
+    rendered list never used."""
+    return (status if status in _BACKLOG_FILTERS else _BACKLOG_DEFAULT_FILTER,
+            ticket_type if ticket_type in _BACKLOG_TYPE_FILTERS else "all")
 
 def backlog_view(status: str, ticket_type: str = "all") -> dict:
     """Backlog items filtered by status and/or type, for the list/filter bars.
@@ -686,11 +703,16 @@ def backlog_view(status: str, ticket_type: str = "all") -> dict:
     "all" status deliberately excludes "deleted" — a soft-deleted ticket
     should only reappear when the Deleted filter is picked on purpose, not
     sit in the default view.
+
+    "total" is the count of items the unfiltered ("all") view would show, so
+    the empty state can tell "nothing here yet" apart from "nothing matches
+    these filters".
     """
-    status      = status if status in _BACKLOG_FILTERS else "all"
-    ticket_type = ticket_type if ticket_type in _BACKLOG_TYPE_FILTERS else "all"
-    items = [i for i in load_backlog()["items"] if _backlog_matches(i, status, ticket_type)]
-    return {"items": items, "status": status, "type": ticket_type}
+    status, ticket_type = normalize_backlog_filters(status, ticket_type)
+    all_items = load_backlog()["items"]
+    items = [i for i in all_items if _backlog_matches(i, status, ticket_type)]
+    total = sum(1 for i in all_items if _backlog_matches(i, "all", "all"))
+    return {"items": items, "status": status, "type": ticket_type, "total": total}
 
 # ── Config sections ────────────────────────────────────────────────────────────
 # Order and display labels for the config editor tabs.
@@ -872,7 +894,7 @@ async def save_config_section(request: Request, section: str):
 
 # ── Backlog routes ───────────────────────────────────────────────────────────────
 @_protected.get("/backlog", response_class=HTMLResponse)
-async def backlog_page(request: Request, status: str = Query("all"),
+async def backlog_page(request: Request, status: str = Query(_BACKLOG_DEFAULT_FILTER),
                         ticket_type: str = Query("all", alias="type")):
     cfg = load_config()
     return templates.TemplateResponse(request, "backlog.html", {
@@ -882,7 +904,7 @@ async def backlog_page(request: Request, status: str = Query("all"),
     })
 
 @_protected.get("/partials/backlog", response_class=HTMLResponse)
-async def partial_backlog(request: Request, status: str = Query("all"),
+async def partial_backlog(request: Request, status: str = Query(_BACKLOG_DEFAULT_FILTER),
                            ticket_type: str = Query("all", alias="type")):
     return templates.TemplateResponse(request, "partials/backlog_list.html", {
         "backlog": backlog_view(status, ticket_type),
@@ -909,10 +931,11 @@ async def backlog_add(request: Request):
             })
             data["next_id"] += 1
             save_backlog(data)
-    # Always land back on the fully-unfiltered view — a just-added item
-    # could otherwise vanish immediately under an active status or type filter.
+    # Always land back on the default view with no type filter — a just-added
+    # item could otherwise vanish immediately under a narrower filter. New
+    # items are "open", so the default "active" filter always shows them.
     return templates.TemplateResponse(request, "partials/backlog_list.html", {
-        "backlog": backlog_view("all", "all"),
+        "backlog": backlog_view(_BACKLOG_DEFAULT_FILTER, "all"),
     })
 
 # Registered before the /backlog/{item_id} routes below: item_id is typed
@@ -1100,7 +1123,9 @@ async def backlog_delete(item_id: int):
 
 @_protected.post("/backlog/{item_id}/move", response_class=HTMLResponse)
 async def backlog_move(request: Request, item_id: int, direction: str = Query("bottom"),
-                        status: str = Query("all"), ticket_type: str = Query("all", alias="type")):
+                        status: str = Query(_BACKLOG_DEFAULT_FILTER),
+                        ticket_type: str = Query("all", alias="type")):
+    status, ticket_type = normalize_backlog_filters(status, ticket_type)
     with _backlog_lock:
         data  = load_backlog()
         items = data["items"]

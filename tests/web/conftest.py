@@ -6,6 +6,7 @@ Or via the shell wrapper:
     bash tests/web/run.sh
 """
 import base64
+import json
 import os
 import sqlite3
 import subprocess
@@ -140,19 +141,42 @@ def log_dir(tmp_path):
 
 
 @pytest.fixture()
+def backlog_file(tmp_path):
+    """Where the app's backlog JSON lives during tests. The client fixture
+    points BACKLOG_FILE here, so no test can read or write the real
+    /var/lib/nase/backlog.json (which a person may be editing in the UI at
+    the same time)."""
+    return tmp_path / "backlog.json"
+
+
+def write_backlog(path, items):
+    """Seed backlog_file with items given as (id, title, status, type)."""
+    rows = [
+        {"id": i, "title": title, "status": status, "type": type_,
+         "description": "", "implementation_details": "",
+         "created_at": "2026-01-01 00:00:00",
+         "links": [], "comments": [], "external_links": []}
+        for i, title, status, type_ in items
+    ]
+    path.write_text(json.dumps(
+        {"items": rows, "next_id": max((r["id"] for r in rows), default=0) + 1}))
+
+
+@pytest.fixture()
 def auth_headers():
     creds = base64.b64encode(f"{TEST_USER}:{TEST_PASS}".encode()).decode()
     return {"Authorization": f"Basic {creds}"}
 
 
 @pytest.fixture()
-def client(config_file, stamp_dir, log_dir, monkeypatch):
+def client(config_file, stamp_dir, log_dir, backlog_file, monkeypatch):
     """TestClient with patched paths, auth, and a fake _run (no systemctl calls)."""
     import modules.web.app.main as m
     from fastapi.testclient import TestClient
 
     monkeypatch.setattr(m, "CONFIG_FILE", config_file)
     monkeypatch.setattr(m, "STAMP_DIR", stamp_dir)
+    monkeypatch.setattr(m, "BACKLOG_FILE", backlog_file)
     monkeypatch.setattr(m, "LOG_DIR", log_dir)
     monkeypatch.setattr(m, "CENTRAL_LOG", log_dir / "nase.log")
     monkeypatch.setattr(m, "_WEB_USERNAME", TEST_USER)
