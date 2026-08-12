@@ -244,6 +244,13 @@ td.mono  { font-family: monospace; font-size: 0.8rem; color: var(--muted); }
   border-top: 1px solid rgba(255,255,255,0.08);
   padding: 0 1.25rem;
   display: flex;
+  /* Six tabs do not fit one line on a phone. Without wrapping, the row
+     overflowed the viewport and widened the whole document, so a sideways
+     swipe panned the page instead of the bar and Backlog/Config could not be
+     reached at all. Wrapping keeps every tab visible rather than merely
+     reachable — an internal overflow-x scroll would hide them behind a
+     gesture with no visible scrollbar on touch. */
+  flex-wrap: wrap;
   gap: 0.25rem;
 }
 
@@ -259,6 +266,13 @@ td.mono  { font-family: monospace; font-size: 0.8rem; color: var(--muted); }
 
 .site-nav a:hover   { color: rgba(255,255,255,0.85); }
 .site-nav a.active  { color: #fff; border-bottom-color: #60a5fa; }
+
+/* Trim the horizontal padding on phones so the wrapped bar settles into two
+   balanced rows (4 + 2 at 390px) instead of a nearly empty second row. */
+@media (max-width: 520px) {
+  .site-nav   { padding: 0 0.5rem; }
+  .site-nav a { padding: 0.5rem 0.5rem; }
+}
 
 /* ── Section tabs (config page) ──────────────────────────────────────────── */
 .tab-bar {
