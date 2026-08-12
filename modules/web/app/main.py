@@ -21,6 +21,9 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from ruamel.yaml import YAML as RuamelYAML
+from ruamel.yaml.comments import CommentedMap, CommentedSeq
+from ruamel.yaml.error import CommentMark
+from ruamel.yaml.tokens import CommentToken
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
@@ -815,6 +818,60 @@ def _section_to_yaml(value: object) -> str:
     _make_ryaml().dump(value, buf)
     return buf.getvalue()
 
+def _last_leaf_holder(node) -> tuple | None:
+    """The innermost container holding the last leaf of `node`, and its key.
+
+    ruamel attaches a comment to whatever *precedes* it in the file. For a
+    block sitting between two sections that is not the section key but the
+    deepest, last scalar of the preceding section's subtree — e.g. the
+    integrity header was on doc['sync_jobs'][8]['trash']['retention_days'].
+    Finding that node is what makes the block rescuable.
+    """
+    holder = None
+    while isinstance(node, (CommentedMap, CommentedSeq)) and len(node) > 0:
+        key = list(node.keys())[-1] if isinstance(node, CommentedMap) else len(node) - 1
+        holder = (node, key)
+        node = node[key]
+    return holder
+
+# Slots in a ca.items entry that hold a "comment that follows this node":
+# index 2 for a mapping key (post-value), index 0 for a sequence item.
+_TRAILING_COMMENT_SLOTS = (2, 0)
+
+def _reanchor_section_comments(doc: CommentedMap) -> None:
+    """Move each block comment that introduces a top-level section onto that
+    section's key, instead of leaving it buried in the previous section.
+
+    Without this, saving a section replaces its whole subtree and takes any
+    such block with it — one save of sync_jobs silently deleted the 23-line
+    header documenting `integrity:`. Rewriting the anchor is lossless: the
+    dumped file is byte-identical, the comment simply now lives on the key it
+    actually documents, where _save_section's existing rescue can protect it.
+
+    Only the part after the first newline moves; the first line is the
+    preceding value's own end-of-line comment and stays with it.
+    """
+    keys = list(doc.keys())
+    for prev_key, next_key in zip(keys, keys[1:]):
+        holder = _last_leaf_holder(doc.get(prev_key))
+        if holder is None:
+            continue
+        node, key = holder
+        entry = node.ca.items.get(key)
+        if not entry:
+            continue
+        for slot in _TRAILING_COMMENT_SLOTS:
+            token = entry[slot] if slot < len(entry) else None
+            if not isinstance(token, CommentToken):
+                continue
+            head, sep, tail = (token.value or "").partition("\n")
+            if "#" not in tail:
+                continue        # just the leaf's own end-of-line comment
+            token.value = head + sep
+            target = doc.ca.items.setdefault(next_key, [None, None, None, None])
+            target[1] = [CommentToken(tail, CommentMark(0), None)] + (target[1] or [])
+            break
+
 def _save_section(section: str, yaml_text: str) -> None:
     """Parse yaml_text with ruamel (preserving CommentedMap/Seq metadata),
     load config.yaml (preserving comments/order in all other sections),
@@ -824,6 +881,10 @@ def _save_section(section: str, yaml_text: str) -> None:
     new_value = ry.load(yaml_text)
     with open(CONFIG_FILE) as f:
         doc = ry.load(f)
+    # Rehome section-introducing comments before touching anything: a Form-view
+    # save sends comment-free YAML, so whatever is still inside the replaced
+    # subtree at this point is gone for good.
+    _reanchor_section_comments(doc)
     # Preserve any block/inline comments attached to this key in the top-level map.
     ca = doc.ca.items.get(section)
     doc[section] = new_value

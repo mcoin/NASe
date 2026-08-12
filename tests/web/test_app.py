@@ -7,7 +7,7 @@ from unittest.mock import patch
 import pytest
 import yaml
 
-from conftest import make_integrity_cache, write_backlog
+from conftest import REPO_ROOT, make_integrity_cache, write_backlog
 
 
 # ── read_log ───────────────────────────────────────────────────────────────────
@@ -740,3 +740,100 @@ def test_saving_untouched_fields_keeps_their_value(client, auth_headers, backlog
     assert item["description"] == "keep me"
     assert item["implementation_details"] == LONG_NOTES
     assert item["status"] == "ready"
+
+
+# ── Config editor: comment preservation (#10) ───────────────────────────────────
+
+CONFIG_WITH_SECTION_HEADER = """\
+nas:
+  hostname: test-nas
+
+sync_jobs:
+  # Header comment inside the section
+  - name: data
+    source: /mnt/primary/data/
+    trash:
+      enabled: false
+      retention_days: 30   # keep a month
+
+# --------------------------------------------------------------------------
+# Checksum integrity manifest (see INTEGRITY_DESIGN.md)
+# --------------------------------------------------------------------------
+integrity:
+  enabled: true
+
+services:
+  web:
+    enabled: true
+"""
+
+
+def test_save_section_keeps_the_header_of_the_following_section(config_file, monkeypatch):
+    """The bug: one Form-view save of sync_jobs deleted the whole comment block
+    documenting `integrity:`, because ruamel had anchored it to the deepest last
+    scalar of the sync_jobs subtree, which the save replaced wholesale."""
+    import modules.web.app.main as m
+    monkeypatch.setattr(m, "CONFIG_FILE", config_file)
+    config_file.write_text(CONFIG_WITH_SECTION_HEADER)
+
+    # Form view marshals plain, comment-free YAML — nothing to restore from.
+    m._save_section("sync_jobs", "- name: data\n  source: /mnt/primary/data/\n")
+
+    text = config_file.read_text()
+    assert "Checksum integrity manifest" in text
+    assert "INTEGRITY_DESIGN.md" in text
+    # ...and it still introduces integrity: rather than floating elsewhere.
+    header_at = text.index("Checksum integrity manifest")
+    assert 0 < header_at < text.index("integrity:")
+
+
+def test_save_section_keeps_the_end_of_line_comment_on_the_last_leaf(config_file, monkeypatch):
+    """Only the block after the first newline is re-anchored; the leaf's own
+    trailing comment belongs to the value and must stay with it."""
+    import modules.web.app.main as m
+    monkeypatch.setattr(m, "CONFIG_FILE", config_file)
+    config_file.write_text(CONFIG_WITH_SECTION_HEADER)
+
+    m._save_section("nas", "hostname: renamed\n")
+
+    text = config_file.read_text()
+    assert "retention_days: 30   # keep a month" in text
+    assert "hostname: renamed" in text
+
+
+def test_save_section_leaves_other_sections_comments_alone(config_file, monkeypatch):
+    import modules.web.app.main as m
+    monkeypatch.setattr(m, "CONFIG_FILE", config_file)
+    config_file.write_text(CONFIG_WITH_SECTION_HEADER)
+
+    m._save_section("services", "web:\n  enabled: false\n")
+
+    text = config_file.read_text()
+    assert "Checksum integrity manifest" in text
+    assert "Header comment inside the section" in text
+    assert yaml.safe_load(text)["services"]["web"]["enabled"] is False
+
+
+def test_reanchor_is_byte_stable_on_the_real_config():
+    """Re-anchoring only changes which node a comment hangs off, never the
+    file: loading the repo's own config.yaml, re-anchoring and dumping must
+    reproduce it exactly."""
+    import io
+    import modules.web.app.main as m
+
+    src = (REPO_ROOT / "config.yaml").read_text()
+    ry = m._make_ryaml()
+    doc = ry.load(src)
+    m._reanchor_section_comments(doc)
+    buf = io.StringIO()
+    ry.dump(doc, buf)
+    assert buf.getvalue() == src
+
+
+def test_reanchor_survives_empty_and_scalar_sections():
+    """Sections with nothing to descend into must not break the walk."""
+    import modules.web.app.main as m
+    ry = m._make_ryaml()
+    doc = ry.load("a: 1\nb: {}\nc: []\n\n# block\nd:\n  x: 1\n")
+    m._reanchor_section_comments(doc)   # must not raise
+    assert list(doc.keys()) == ["a", "b", "c", "d"]
