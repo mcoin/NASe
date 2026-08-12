@@ -52,6 +52,16 @@ unit_ran_recently() {
     (( ts_epoch <= now && now - ts_epoch <= window ))
 }
 
+# unit_start_epoch <unit>
+# When the unit last started, as an epoch. Prints nothing and fails when
+# systemd has no timestamp for it.
+unit_start_epoch() {
+    local ts_str
+    ts_str=$(systemctl show "$1" -p ExecMainStartTimestamp --value 2>/dev/null)
+    [[ -z "$ts_str" || "$ts_str" == "n/a" ]] && return 1
+    date -d "$ts_str" +%s 2>/dev/null || return 1
+}
+
 # guess_wake_reason <mountpoint> <window_secs>
 # Best-effort explanation for a drive waking up, cheapest/most-likely first.
 # <window_secs> is how far back to look for a triggering job — normally the
@@ -66,18 +76,36 @@ guess_wake_reason() {
 
     # Sync jobs run rsync and the integrity scan inline in the same systemd
     # unit (see modules/sync/sync.sh), so this one check covers both.
-    local sn
+    #
+    # Every job matching this drive is considered, not just the first one
+    # found: all of them share OnCalendar=03:00, so several are typically in
+    # the window at once. Taking the first match meant taking whichever job
+    # config.yaml happens to list first — which is how backlog #4 came to
+    # blame nase-cfg-backup-daily for 14 of 23 wakes it had nothing to do
+    # with. The drive wakes on the first access, so among the jobs in the
+    # window the one that started earliest is the plausible cause; when
+    # several qualify, say so rather than implying certainty.
+    local sn best_job="" best_ts="" matches=0 ts
     sn=$(config_len '.sync_jobs')
     for i in $(seq 0 $((sn - 1))); do
         job=$(config_idx '.sync_jobs' "$i" '.name')
         src=$(config_idx '.sync_jobs' "$i" '.source')
         dst=$(config_idx '.sync_jobs' "$i" '.dest')
-        if [[ "$src" == "$mountpoint"* || "$dst" == "$mountpoint"* ]] \
-           && unit_ran_recently "nase-sync-${job}.service" "$window"; then
-            reason="sync job: ${job}"
-            break
+        [[ "$src" == "$mountpoint"* || "$dst" == "$mountpoint"* ]] || continue
+        unit_ran_recently "nase-sync-${job}.service" "$window" || continue
+        matches=$(( matches + 1 ))
+        ts=$(unit_start_epoch "nase-sync-${job}.service") || ts=""
+        # An unknown start time never displaces a known-earlier one.
+        if [[ -z "$best_job" ]] \
+           || { [[ -n "$ts" ]] && { [[ -z "$best_ts" ]] || (( ts < best_ts )); }; }; then
+            best_job="$job"
+            best_ts="$ts"
         fi
     done
+    if [[ -n "$best_job" ]]; then
+        reason="sync job: ${best_job}"
+        (( matches > 1 )) && reason="${reason} (first of ${matches} in window)"
+    fi
 
     if [[ -z "$reason" ]] && unit_ran_recently nase-monitor.service "$window"; then
         reason="SMART health check (nase-monitor)"

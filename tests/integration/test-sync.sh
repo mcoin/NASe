@@ -180,4 +180,65 @@ echo "hello" > "$SRC/file1.txt"
 rm -rf "$WORK/backup"   # dest parent gone
 assert_exit0 "missing dest: exits 0 (graceful skip)" run_sync
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Test 9: Change detection names what triggered it
+# A job whose detection fires nightly while rsync transfers nothing is
+# otherwise indistinguishable from one with real changes (backlog #4), so the
+# triggering path and its mtime have to be in the log. Asserted against the
+# detection line alone — the filename also shows up in rsync's transfer list,
+# which would make these pass without the log line existing at all.
+# ─────────────────────────────────────────────────────────────────────────────
+reset; write_cfg
+echo "hello" > "$SRC/file1.txt"
+touch -d "1 minute ago" "$SRC/file1.txt"
+run_sync                                   # first run creates the stamp
+echo "changed" > "$SRC/trigger.txt"        # newer than the stamp
+touch -d "1 minute ago" "$SRC"             # ...but the dir itself is not, so
+                                           # find reports the file, not its parent
+: > "$LOGS/nase.log"
+run_sync
+DETECTED=$(grep "changes detected" "$LOGS/nase.log" || true)
+assert_contains "detection log: names the triggering path" "trigger.txt" "$DETECTED"
+assert_contains "detection log: reports its mtime"         "mtime"       "$DETECTED"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Test 10: A future-dated mtime is reported, not silently re-triggering
+# This is the shape backlog #4 suspects behind the nightly movies sync: a file
+# the stamp can never overtake, so detection fires every night while rsync has
+# nothing to send.
+# ─────────────────────────────────────────────────────────────────────────────
+reset; write_cfg
+echo "hello" > "$SRC/file1.txt"
+touch -d "1 minute ago" "$SRC/file1.txt"
+run_sync                                   # stamp is now "just now"
+echo "from the future" > "$SRC/tomorrow.txt"
+touch -d "tomorrow" "$SRC/tomorrow.txt"
+touch -d "1 minute ago" "$SRC"
+: > "$LOGS/nase.log"
+run_sync
+DETECTED=$(grep "changes detected" "$LOGS/nase.log" || true)
+assert_contains "future mtime: detection names the offending file" "tomorrow.txt" "$DETECTED"
+
+# A second run with nothing else touched must fire again — that is the
+# permanence which makes this shape worth naming in the log.
+: > "$LOGS/nase.log"
+run_sync
+DETECTED=$(grep "changes detected" "$LOGS/nase.log" || true)
+assert_contains "future mtime: still fires on the next run" "tomorrow.txt" "$DETECTED"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Test 11: The skip line reports how old the stamp is
+# Without it there is no way to tell a job that skipped yesterday from one that
+# has not run in a month, which is what force_sync_days is judged against.
+# ─────────────────────────────────────────────────────────────────────────────
+reset; write_cfg
+echo "hello" > "$SRC/file1.txt"
+touch -d "1 minute ago" "$SRC/file1.txt"
+run_sync
+: > "$LOGS/nase.log"
+run_sync                                   # nothing changed -> skip
+LOG_OUT=$(cat "$LOGS/nase.log")
+assert_contains "skip log: says no changes"        "no changes since last sync" "$LOG_OUT"
+assert_contains "skip log: reports the stamp age"  "stamp 0d old"               "$LOG_OUT"
+
 test_summary

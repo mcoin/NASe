@@ -82,23 +82,35 @@ STAMP_DIR="${NASE_STAMP_DIR:-/var/lib/nase}"
 STAMP_FILE="${STAMP_DIR}/sync-${JOB_NAME}.stamp"
 
 if [[ -f "$STAMP_FILE" ]]; then
+    stamp_mtime=$(stat -c %Y "$STAMP_FILE" 2>/dev/null || echo "0")
+    stamp_age_days=$(( ( $(date +%s) - stamp_mtime ) / 86400 ))
+    # Guard against negative age (e.g. clock correction)
+    [[ $stamp_age_days -lt 0 ]] && stamp_age_days=0
+
     # -print -quit exits on the first match — fast even on large trees
     changed=$(find "$source_path" -newer "$STAMP_FILE" -print -quit 2>/dev/null)
-    if [[ -z "$changed" ]]; then
+    if [[ -n "$changed" ]]; then
+        # Name what triggered the run. A job whose detection fires every night
+        # while rsync then transfers nothing is otherwise indistinguishable
+        # from one with real changes, and that is exactly the state this
+        # machine has been in (see backlog #4). find has just read the entry,
+        # so asking for its mtime costs no extra drive access — and a
+        # timestamp in the future, which no stamp file can ever overtake,
+        # becomes obvious instead of needing a manual hunt while the drive
+        # happens to be awake.
+        changed_mtime=$(stat -c '%y' "$changed" 2>/dev/null || echo "unknown")
+        log_info "Sync job '${JOB_NAME}': changes detected — '${changed}' (mtime ${changed_mtime}; stamp ${stamp_age_days}d old)."
+    else
         # No changes detected — check whether the forced sync interval has elapsed
         force_sync=false
         if [[ "$force_sync_days" -gt 0 ]]; then
-            stamp_mtime=$(stat -c %Y "$STAMP_FILE" 2>/dev/null || echo "0")
-            stamp_age_days=$(( ( $(date +%s) - stamp_mtime ) / 86400 ))
-            # Guard against negative age (e.g. clock correction)
-            [[ $stamp_age_days -lt 0 ]] && stamp_age_days=0
             if [[ "$stamp_age_days" -ge "$force_sync_days" ]]; then
                 force_sync=true
                 log_info "Sync job '${JOB_NAME}': no changes detected, but ${stamp_age_days}d since last sync (threshold: ${force_sync_days}d) — forcing sync."
             fi
         fi
         if [[ "$force_sync" == "false" ]]; then
-            log_info "Sync job '${JOB_NAME}': no changes since last sync — skipping."
+            log_info "Sync job '${JOB_NAME}': no changes since last sync (stamp ${stamp_age_days}d old) — skipping."
             exit 0
         fi
     fi
