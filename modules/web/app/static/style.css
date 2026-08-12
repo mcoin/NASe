@@ -466,6 +466,16 @@ td.mono  { font-family: monospace; font-size: 0.8rem; color: var(--muted); }
    a 100-line note through a 6-row box — scrolling inside a box that is itself
    inside the page scroll — was the worst part of the page on a phone.
    Styled to match .backlog-comment-text, which already reads well there. */
+/* Label cell that carries an action (the Edit toggle) beside its text, so the
+   control costs no vertical space of its own. Sits in the .form-row label
+   column, which is 160px wide above the stacking breakpoint — enough for the
+   longest label here plus the button. */
+.form-label-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
 .field-readfirst { align-items: flex-start; gap: 0.5rem; }
 
 /* The toggle swaps the [hidden] attribute; .form-field is a flex container, so

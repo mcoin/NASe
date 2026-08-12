@@ -720,6 +720,8 @@ def test_detail_edit_toggle_points_at_both_nodes(client, auth_headers, backlog_f
     assert 'data-editor="field-description"' in html
     assert 'data-view="view-description"' in html
     assert 'data-editor="field-impl"' in html
+    # The toggle shares the label's line rather than taking a row of its own.
+    assert html.count("form-label-row") == 2
 
 
 def test_saving_untouched_fields_keeps_their_value(client, auth_headers, backlog_file):
