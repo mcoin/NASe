@@ -812,9 +812,17 @@ td.mono  { font-family: monospace; font-size: 0.8rem; color: var(--muted); }
   gap: 0.5rem;
 }
 
-/* .btn-save and .win-btn are styled for <button>; these are links. */
+/* .btn-save and .win-btn are styled for <button>; these are links.
+   inline-flex, not inline-block: .error-actions is a flex row that stretches
+   its children to the tallest one, so the shorter .win-btn pill was blown up
+   to the .btn-save's height while its label stayed where its own padding put
+   it — measured at 4.45px above the pill's centre, against 0.00 for the
+   button next to it. Centring inside each child fixes the label wherever the
+   two classes' padding and font-size differ. */
 .error-actions a {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   text-decoration: none;
 }
 
