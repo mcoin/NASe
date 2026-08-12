@@ -150,14 +150,21 @@ def backlog_file(tmp_path):
 
 
 def write_backlog(path, items):
-    """Seed backlog_file with items given as (id, title, status, type)."""
-    rows = [
-        {"id": i, "title": title, "status": status, "type": type_,
-         "description": "", "implementation_details": "",
-         "created_at": "2026-01-01 00:00:00",
-         "links": [], "comments": [], "external_links": []}
-        for i, title, status, type_ in items
-    ]
+    """Seed backlog_file with items given as (id, title, status, type), or as
+    dicts when a test needs more than that (description, notes, ...) — dict
+    keys are merged over the same defaults."""
+    rows = []
+    for item in items:
+        row = {"id": None, "title": "", "status": "open", "type": "feature",
+               "description": "", "implementation_details": "",
+               "created_at": "2026-01-01 00:00:00",
+               "links": [], "comments": [], "external_links": []}
+        if isinstance(item, dict):
+            row.update(item)
+        else:
+            i, title, status, type_ = item
+            row.update(id=i, title=title, status=status, type=type_)
+        rows.append(row)
     path.write_text(json.dumps(
         {"items": rows, "next_id": max((r["id"] for r in rows), default=0) + 1}))
 

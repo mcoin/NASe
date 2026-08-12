@@ -39,8 +39,19 @@
 
       <div class="form-row">
         <label class="form-label" for="field-description">Description</label>
-        <div class="form-field">
-          <textarea class="form-input" id="field-description" name="description" rows="6"
+        {# Read first, edit second: the rendered text and the textarea are both
+           in the DOM and the toggle only swaps which is visible, so the form
+           still posts 'description' unchanged when nobody edits it. #}
+        <div class="form-field field-readfirst">
+          {# Toggle first in source order: with a long value the button would
+             otherwise sit a hundred lines below the label, off-screen. #}
+          <button type="button" class="win-btn field-edit-toggle"
+                  data-editor="field-description" data-view="view-description"
+                  data-empty="No description yet.">Edit</button>
+          <div class="field-text{% if not item.description %} field-empty{% endif %}"
+               id="view-description">{{ item.description or "No description yet." }}</div>
+          <textarea class="form-input field-editor" id="field-description" name="description"
+                    rows="6" hidden
                     style="max-width:520px; resize:vertical;">{{ item.description }}</textarea>
         </div>
       </div>
@@ -69,8 +80,14 @@
         <p class="form-section-head">Implementation details</p>
         <div class="form-row">
           <label class="form-label" for="field-impl">Notes</label>
-          <div class="form-field">
-            <textarea class="form-input" id="field-impl" name="implementation_details" rows="6"
+          <div class="form-field field-readfirst">
+            <button type="button" class="win-btn field-edit-toggle"
+                    data-editor="field-impl" data-view="view-impl"
+                    data-empty="No notes yet.">Edit</button>
+            <div class="field-text{% if not item.implementation_details %} field-empty{% endif %}"
+                 id="view-impl">{{ item.implementation_details or "No notes yet." }}</div>
+            <textarea class="form-input field-editor" id="field-impl" name="implementation_details"
+                      rows="6" hidden
                       style="max-width:520px; resize:vertical;"
                       placeholder="Approach, affected files, open questions...">{{ item.implementation_details }}</textarea>
           </div>
@@ -221,4 +238,37 @@
 
   </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // ── Read-first fields ─────────────────────────────────────────────────────
+  // Description and Notes render as text and only become textareas on demand.
+  // Both nodes stay in the DOM, so Save posts the field whether or not it was
+  // ever opened; the toggle just swaps visibility and syncs the rendered text
+  // back from the textarea when closing.
+  document.querySelectorAll(".field-edit-toggle").forEach(function(btn) {
+    var editor = document.getElementById(btn.dataset.editor);
+    var view   = document.getElementById(btn.dataset.view);
+    if (!editor || !view) return;
+
+    btn.addEventListener("click", function() {
+      var opening = editor.hidden;
+      editor.hidden = !opening;
+      view.hidden   = opening;
+      btn.textContent = opening ? "Done" : "Edit";
+      if (opening) {
+        // Grow to the content so editing does not happen through a 6-row
+        // window, but stay bounded so the Save button remains reachable.
+        var lines = editor.value.split("\n").length + 1;
+        editor.rows = Math.min(Math.max(lines, 6), 30);
+        editor.focus();
+      } else {
+        var text = editor.value.trim();
+        view.textContent = text || btn.dataset.empty;
+        view.classList.toggle("field-empty", text === "");
+      }
+    });
+  });
+</script>
 {% endblock %}

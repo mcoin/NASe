@@ -674,3 +674,67 @@ def test_unknown_url_gets_styled_404(client, auth_headers):
     r = client.get("/no/such/page", headers={**HTML_ACCEPT, **auth_headers})
     assert r.status_code == 404
     assert "Back to Dashboard" in r.text
+
+
+# ── Backlog detail: read-first fields ───────────────────────────────────────────
+
+LONG_NOTES = "== Section ==\n" + "\n".join(f"line {i}" for i in range(120))
+
+
+def _detail(client, auth_headers, backlog_file, **fields):
+    write_backlog(backlog_file, [{"id": 1, "title": "a ticket", **fields}])
+    return client.get("/backlog/1", headers=auth_headers).text
+
+
+def test_detail_renders_description_as_text_not_only_in_a_textarea(client, auth_headers, backlog_file):
+    html = _detail(client, auth_headers, backlog_file, description="hello world")
+    # The rendered view is what makes the page readable on a phone; the
+    # textarea stays in the DOM so Save still posts the field untouched.
+    assert 'id="view-description"' in html
+    assert html.count("hello world") == 2
+
+
+def test_detail_renders_full_notes_without_truncating(client, auth_headers, backlog_file):
+    html = _detail(client, auth_headers, backlog_file, implementation_details=LONG_NOTES)
+    assert 'id="view-impl"' in html
+    assert "line 119" in html
+
+
+def test_detail_empty_fields_show_a_muted_placeholder(client, auth_headers, backlog_file):
+    html = _detail(client, auth_headers, backlog_file)
+    assert "No description yet." in html
+    assert "No notes yet." in html
+    assert "field-empty" in html
+
+
+def test_detail_non_empty_field_has_no_empty_placeholder_class(client, auth_headers, backlog_file):
+    html = _detail(client, auth_headers, backlog_file,
+                   description="something", implementation_details="something else")
+    # "field-empty" also appears in the toggle script, so check the class
+    # actually applied to the rendered views rather than the whole page.
+    assert "field-text field-empty" not in html
+
+
+def test_detail_edit_toggle_points_at_both_nodes(client, auth_headers, backlog_file):
+    html = _detail(client, auth_headers, backlog_file, description="hello")
+    assert 'data-editor="field-description"' in html
+    assert 'data-view="view-description"' in html
+    assert 'data-editor="field-impl"' in html
+
+
+def test_saving_untouched_fields_keeps_their_value(client, auth_headers, backlog_file):
+    """The read-first swap is client-side only: an unopened field posts the
+    textarea's original value, so a Save from the rendered view must not
+    blank the description or the notes."""
+    write_backlog(backlog_file, [{"id": 1, "title": "a ticket",
+                                  "description": "keep me",
+                                  "implementation_details": LONG_NOTES}])
+    r = client.post("/backlog/1", headers=auth_headers, follow_redirects=False,
+                    data={"title": "a ticket", "type": "feature", "status": "ready",
+                          "description": "keep me",
+                          "implementation_details": LONG_NOTES})
+    assert r.status_code == 303
+    item = json.loads(backlog_file.read_text())["items"][0]
+    assert item["description"] == "keep me"
+    assert item["implementation_details"] == LONG_NOTES
+    assert item["status"] == "ready"

@@ -461,6 +461,29 @@ td.mono  { font-family: monospace; font-size: 0.8rem; color: var(--muted); }
 
 .form-field { display: flex; flex-direction: column; gap: 0.25rem; }
 
+/* Read-first fields (Description, Notes on a backlog item): the value is
+   rendered as text and only becomes a textarea when Edit is pressed. Reading
+   a 100-line note through a 6-row box — scrolling inside a box that is itself
+   inside the page scroll — was the worst part of the page on a phone.
+   Styled to match .backlog-comment-text, which already reads well there. */
+.field-readfirst { align-items: flex-start; gap: 0.5rem; }
+
+/* The toggle swaps the [hidden] attribute; .form-field is a flex container, so
+   spell out that hidden children stay hidden rather than relying on the UA
+   stylesheet surviving any future display rule on .field-text/.form-input. */
+.field-readfirst [hidden] { display: none; }
+
+.field-text {
+  font-size: 0.85rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-width: 520px;
+}
+
+.field-text.field-empty { color: var(--muted); font-style: italic; }
+
+.field-edit-toggle { flex-shrink: 0; }
+
 .form-input {
   width: 100%;
   max-width: 360px;
@@ -477,6 +500,24 @@ td.mono  { font-family: monospace; font-size: 0.8rem; color: var(--muted); }
 .form-input:focus {
   border-color: #2563eb;
   box-shadow: 0 0 0 2px rgba(37,99,235,0.15);
+}
+
+/* Phone widths: .form-row's fixed 160px label column leaves about 145px for
+   the field itself at 390px, which truncates inputs mid-word and squeezes
+   textareas into a ribbon a few words wide. Put the label above its field
+   instead — same stacking idea as .responsive-table, same 520px breakpoint
+   as the backlog rows.
+   The 16px font-size is not cosmetic: iOS Safari zooms the whole page when
+   focusing an input smaller than that, and never zooms back out. */
+@media (max-width: 520px) {
+  .form-row {
+    grid-template-columns: 1fr;
+    gap: 0.35rem;
+  }
+
+  .form-label { padding-top: 0; }
+
+  .form-input { font-size: 1rem; }
 }
 
 .form-hint {
