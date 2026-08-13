@@ -9,6 +9,7 @@ REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 source "${REPO_ROOT}/lib/log.sh"
 source "${REPO_ROOT}/lib/config.sh"
 source "${REPO_ROOT}/lib/guards.sh"
+source "${REPO_ROOT}/lib/calendar.sh"
 
 JOB_NAME="${1:-}"
 [[ -n "$JOB_NAME" ]] || die "Usage: sync.sh <job-name>"
@@ -38,6 +39,17 @@ rsync_flags=$(config_idx      '.sync_jobs' "$job_index" '.rsync_flags')
 on_failure=$(config_idx       '.sync_jobs' "$job_index" '.on_failure')
 force_sync_days=$(config_idx  '.sync_jobs' "$job_index" '.force_sync_days')
 force_sync_days="${force_sync_days:-7}"
+# Optional: pin the forced sync to a calendar day instead of counting elapsed
+# days since this job last ran. force_sync_days anchors each job's next forced
+# run to whenever it last happened to run, so nine jobs drift onto nine
+# different days and wake the drive on each of them.
+force_sync_calendar=$(config_idx     '.sync_jobs' "$job_index" '.force_sync_calendar')
+# Safety net so a pinned schedule can never quietly become "never" (Pi powered
+# off on the pinned day, a spec that stops matching). 45 days is longer than
+# the widest gap a monthly pin can produce (35), so it only fires when the
+# pinned day was genuinely missed.
+force_sync_max_age_days=$(config_idx '.sync_jobs' "$job_index" '.force_sync_max_age_days')
+force_sync_max_age_days="${force_sync_max_age_days:-45}"
 trash_enabled=$(config_idx    '.sync_jobs' "$job_index" '.trash.enabled')
 trash_path=$(config_idx       '.sync_jobs' "$job_index" '.trash.path')
 trash_days=$(config_idx       '.sync_jobs' "$job_index" '.trash.retention_days')
@@ -101,14 +113,41 @@ if [[ -f "$STAMP_FILE" ]]; then
         changed_mtime=$(stat -c '%y' "$changed" 2>/dev/null || echo "unknown")
         log_info "Sync job '${JOB_NAME}': changes detected — '${changed}' (mtime ${changed_mtime}; stamp ${stamp_age_days}d old)."
     else
-        # No changes detected — check whether the forced sync interval has elapsed
+        # No changes detected — decide whether this run is a forced one.
         force_sync=false
-        if [[ "$force_sync_days" -gt 0 ]]; then
+        force_mode="days"
+        if [[ -n "$force_sync_calendar" ]]; then
+            if calendar_spec_valid "$force_sync_calendar"; then
+                force_mode="calendar"
+            else
+                # Fall back rather than skip: a typo must not silently turn
+                # forced syncs off, which would be worse than not pinning them
+                # at all. validate-config.sh rejects this at apply time; this
+                # is the guard for a hand-edited config.
+                log_warn "Sync job '${JOB_NAME}': force_sync_calendar '${force_sync_calendar}' is not a valid systemd calendar expression — falling back to force_sync_days=${force_sync_days}."
+            fi
+        fi
+
+        if [[ "$force_mode" == "calendar" ]]; then
+            today_start=$(date -d "today 00:00:00" +%s)
+            if [[ "$stamp_mtime" -ge "$today_start" ]]; then
+                # Already synced today — a pinned day forces at most one run,
+                # however many times the timer fires.
+                :
+            elif calendar_matches_day "$force_sync_calendar"; then
+                force_sync=true
+                log_info "Sync job '${JOB_NAME}': no changes detected, but today matches force_sync_calendar '${force_sync_calendar}' — forcing sync."
+            elif [[ "$force_sync_max_age_days" -gt 0 && "$stamp_age_days" -ge "$force_sync_max_age_days" ]]; then
+                force_sync=true
+                log_warn "Sync job '${JOB_NAME}': force_sync_calendar '${force_sync_calendar}' has not fired for ${stamp_age_days}d (max ${force_sync_max_age_days}d) — forcing sync."
+            fi
+        elif [[ "$force_sync_days" -gt 0 ]]; then
             if [[ "$stamp_age_days" -ge "$force_sync_days" ]]; then
                 force_sync=true
                 log_info "Sync job '${JOB_NAME}': no changes detected, but ${stamp_age_days}d since last sync (threshold: ${force_sync_days}d) — forcing sync."
             fi
         fi
+
         if [[ "$force_sync" == "false" ]]; then
             log_info "Sync job '${JOB_NAME}': no changes since last sync (stamp ${stamp_age_days}d old) — skipping."
             exit 0

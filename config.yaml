@@ -115,6 +115,39 @@ config_archive:
   schedule: '*-*-* 02:00:00'
   retention_days: 90
   on_failure: notify
+# --------------------------------------------------------------------------
+# Sync jobs
+# --------------------------------------------------------------------------
+# schedule uses systemd OnCalendar format:
+#   "*-*-* 03:00:00"      → daily at 03:00
+#   "*-*-* *:00/30:00"    → every 30 minutes
+#   "Mon *-*-* 02:00:00"  → every Monday at 02:00
+# See: systemd.time(7) or run: systemd-analyze calendar "<expression>"
+#
+# rsync_flags:     passed verbatim to rsync
+# on_failure:      "notify" | "ignore"
+# force_sync_days: run a full sync even when no changes are detected, if this
+#                  many days have passed since the last successful sync.
+#                  Guards against the change-detection mechanism being wrong.
+#                  Default: 7. Set to 0 to disable.
+#
+# force_sync_calendar:
+#                  Pin the forced sync to a day instead of counting days since
+#                  this job last ran, so the forced runs of several jobs land
+#                  on the same day and share one drive spin-up between them.
+#                  Same syntax as schedule; only the day part is used, since
+#                  the job's own schedule decides the hour. Takes precedence
+#                  over force_sync_days when set. Examples:
+#                    'Thu'            → every Thursday
+#                    'Thu *-*-1..7'   → first Thursday of the month
+#                    '*-*-01'         → the 1st of every month
+# force_sync_max_age_days:
+#                  Safety net for the above: force a sync anyway once this many
+#                  days have passed, so a pinned day that is missed (Pi powered
+#                  off, drive absent) cannot quietly turn into "never".
+#                  Default: 45 — longer than the widest gap a monthly pin can
+#                  produce (35 days), so it only fires on a genuine miss.
+# --------------------------------------------------------------------------
 sync_jobs:
   # NASe config archive — mirrors the versioned config history to the backup
   # drive. Trash is disabled; snapshots are managed by the config-archive timer.

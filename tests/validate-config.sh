@@ -113,6 +113,8 @@ for i in $(seq 0 $((n_jobs - 1))); do
     dest=$(config_idx     '.sync_jobs' "$i" '.dest')
     schedule=$(config_idx '.sync_jobs' "$i" '.schedule')
     on_failure=$(config_idx '.sync_jobs' "$i" '.on_failure')
+    force_calendar=$(config_idx '.sync_jobs' "$i" '.force_sync_calendar')
+    force_max_age=$(config_idx  '.sync_jobs' "$i" '.force_sync_max_age_days')
 
     [[ -n "$job_name"  ]] || fail ".sync_jobs[$i].name is required."
     [[ -n "$source"    ]] || fail ".sync_jobs[$i].source is required (job: ${job_name})."
@@ -134,6 +136,19 @@ for i in $(seq 0 $((n_jobs - 1))); do
     fi
     if [[ -n "${seen_mountpoints[${dest%/}]+x}" ]]; then
         fail ".sync_jobs[$i].dest is a drive mountpoint root (job: ${job_name}). Got: '${dest}' — use a subdirectory instead."
+    fi
+
+    # A forced sync pinned to a day is the one setting whose failure mode is
+    # silence: an unparseable spec would simply never match, and the job would
+    # stop being force-synced without anything looking wrong. Catch it here,
+    # at apply time, rather than at some 03:00 months from now.
+    if [[ -n "$force_calendar" ]] && command -v systemd-analyze &>/dev/null; then
+        if ! systemd-analyze calendar "$force_calendar" &>/dev/null; then
+            fail ".sync_jobs[$i].force_sync_calendar '${force_calendar}' is not a valid systemd calendar expression (job: ${job_name})."
+        fi
+    fi
+    if [[ -n "$force_max_age" ]] && ! [[ "$force_max_age" =~ ^[0-9]+$ ]]; then
+        fail ".sync_jobs[$i].force_sync_max_age_days must be a whole number of days (job: ${job_name}). Got: '${force_max_age}'"
     fi
 
     if [[ -n "${seen_job_names[$job_name]+x}" ]]; then

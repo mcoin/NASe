@@ -54,6 +54,44 @@ notifications:
 YAML
 }
 
+
+# ── Config generator: forced sync pinned to a calendar day ───────────────────
+# Usage: write_cfg_calendar SPEC [max_age_days:45] [force_sync_days:0]
+write_cfg_calendar() {
+    local spec="$1" max_age="${2:-45}" force_days="${3:-0}"
+    cat > "$TEST_CFG" <<YAML
+sync_jobs:
+  - name: ${JOB}
+    source: ${SRC}/
+    dest: ${DST}/
+    schedule: '*-*-* 03:00:00'
+    rsync_flags: --archive --delete
+    on_failure: ignore
+    force_sync_days: ${force_days}
+    force_sync_calendar: '${spec}'
+    force_sync_max_age_days: ${max_age}
+    trash:
+      enabled: false
+YAML
+}
+
+# quiesce SOURCE_AGE STAMP_AGE
+# Put the source tree far enough in the past that change detection finds
+# nothing, then set the stamp to the wanted age. Ageing the files alone is not
+# enough: creating or removing anything bumps the *directory's* mtime, and find
+# reports the directory, so a test meaning to exercise the forced-sync path
+# would silently be exercising ordinary change detection instead.
+quiesce() {
+    local source_age="$1" stamp_age="$2"
+    find "$SRC" -exec touch -d "$source_age" {} +
+    touch -d "$stamp_age" "$STAMPS/sync-${JOB}.stamp"
+}
+
+# Weekday names for "today" and "a day that is not today", so these tests give
+# the same answer whichever day the suite happens to run on.
+TODAY_DOW=$(LC_ALL=C date +%a)
+OTHER_DOW=$(LC_ALL=C date -d tomorrow +%a)
+
 # ── Sandboxed runner ──────────────────────────────────────────────────────────
 run_sync() {
     CONFIG_FILE="$TEST_CFG"          \
@@ -240,5 +278,85 @@ run_sync                                   # nothing changed -> skip
 LOG_OUT=$(cat "$LOGS/nase.log")
 assert_contains "skip log: says no changes"        "no changes since last sync" "$LOG_OUT"
 assert_contains "skip log: reports the stamp age"  "stamp 0d old"               "$LOG_OUT"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Test 12: force_sync_calendar forces a sync on the pinned day
+# ─────────────────────────────────────────────────────────────────────────────
+reset; write_cfg_calendar "$TODAY_DOW"
+echo "hello" > "$SRC/file1.txt"
+touch -d "1 minute ago" "$SRC/file1.txt"
+run_sync                                    # first run creates the stamp
+quiesce "10 days ago" "3 days ago"
+echo "canary" > "$DST/canary.txt"
+: > "$LOGS/nase.log"
+run_sync
+assert_file_absent "calendar: pinned day forces a sync (canary deleted)" "$DST/canary.txt"
+assert_contains "calendar: log names the matching spec" \
+    "matches force_sync_calendar" "$(cat "$LOGS/nase.log")"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Test 13: no sync on a day that is not pinned
+# The whole point of pinning: an unpinned day must not wake the backup drive,
+# however long ago the job last ran (short of the safety net below).
+# ─────────────────────────────────────────────────────────────────────────────
+reset; write_cfg_calendar "$OTHER_DOW"
+echo "hello" > "$SRC/file1.txt"
+touch -d "1 minute ago" "$SRC/file1.txt"
+run_sync
+quiesce "10 days ago" "3 days ago"
+echo "canary" > "$DST/canary.txt"
+: > "$LOGS/nase.log"
+run_sync
+assert_file_exists "calendar: unpinned day does not sync (canary survives)" "$DST/canary.txt"
+assert_contains "calendar: unpinned day logs a skip" \
+    "no changes since last sync" "$(cat "$LOGS/nase.log")"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Test 14: force_sync_max_age_days is the safety net
+# A pinned schedule that stops firing (Pi powered off on the day, spec that no
+# longer matches) must not silently decay into "never".
+# ─────────────────────────────────────────────────────────────────────────────
+reset; write_cfg_calendar "$OTHER_DOW" 10
+echo "hello" > "$SRC/file1.txt"
+touch -d "1 minute ago" "$SRC/file1.txt"
+run_sync
+quiesce "30 days ago" "20 days ago"   # 20d stamp > max_age 10d
+echo "canary" > "$DST/canary.txt"
+: > "$LOGS/nase.log"
+run_sync
+assert_file_absent "calendar: max age forces a sync past the missed day" "$DST/canary.txt"
+assert_contains "calendar: max-age force is logged as a warning" \
+    "has not fired" "$(cat "$LOGS/nase.log")"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Test 15: at most one forced run per pinned day
+# The timer fires daily; the pin must not re-force on every firing.
+# ─────────────────────────────────────────────────────────────────────────────
+reset; write_cfg_calendar "$TODAY_DOW"
+echo "hello" > "$SRC/file1.txt"
+touch -d "1 minute ago" "$SRC/file1.txt"
+run_sync
+quiesce "10 days ago" "3 days ago"
+run_sync                                    # the pinned run; stamp is now today
+echo "canary" > "$DST/canary.txt"
+: > "$LOGS/nase.log"
+run_sync                                    # same day again -> must not force
+assert_file_exists "calendar: second run on the pinned day does not sync" "$DST/canary.txt"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Test 16: an unparseable spec warns and falls back to force_sync_days
+# Silently never forcing again would be worse than not pinning at all.
+# ─────────────────────────────────────────────────────────────────────────────
+reset; write_cfg_calendar "Thurs-day" 45 2
+echo "hello" > "$SRC/file1.txt"
+touch -d "1 minute ago" "$SRC/file1.txt"
+run_sync
+quiesce "10 days ago" "5 days ago"     # 5d stamp > force_sync_days 2
+echo "canary" > "$DST/canary.txt"
+: > "$LOGS/nase.log"
+run_sync
+LOG_OUT=$(cat "$LOGS/nase.log")
+assert_contains  "calendar: invalid spec warns"            "not a valid systemd calendar" "$LOG_OUT"
+assert_file_absent "calendar: invalid spec falls back to force_sync_days" "$DST/canary.txt"
 
 test_summary

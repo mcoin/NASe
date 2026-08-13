@@ -849,6 +849,15 @@
       lines.push("  rsync_flags: "    + (j.rsync_flags    || "--archive --delete"));
       lines.push("  on_failure: "     + (j.on_failure     || "notify"));
       lines.push("  force_sync_days: "+ (parseInt(j.force_sync_days, 10) || 7));
+      // Only emitted when set, so jobs that do not pin their forced sync stay
+      // clean — and emitted at all, so a Form-view save cannot silently drop
+      // a pin that was configured by hand.
+      if (j.force_sync_calendar) {
+        lines.push("  force_sync_calendar: '" + j.force_sync_calendar + "'");
+        if (j.force_sync_max_age_days) {
+          lines.push("  force_sync_max_age_days: " + (parseInt(j.force_sync_max_age_days, 10) || 45));
+        }
+      }
       lines.push("  trash:");
       lines.push("    enabled: "      + (trashEnabled ? "true" : "false"));
       if (trashEnabled) {
@@ -871,6 +880,8 @@
     j.rsync_flags    = _g("rsync_flags");
     j.on_failure     = _g("on_failure");
     j.force_sync_days= _g("force_sync_days");
+    j.force_sync_calendar     = _g("force_sync_calendar");
+    j.force_sync_max_age_days = _g("force_sync_max_age_days");
     if (!j.trash) j.trash = {};
     j.trash.enabled        = _gc("trash-enabled");
     j.trash.path           = _g("trash-path");
@@ -912,6 +923,14 @@
       + '<div class="form-row"><label class="form-label" for="sync-'+i+'-force_sync_days">Force sync (days)</label>'
       + '<div class="form-field"><input class="form-input form-input-sm" id="sync-'+i+'-force_sync_days" type="number" min="1" value="'+e(j.force_sync_days||"7")+'">'
       + '<span class="form-hint">Run a full sync even without changes after this many days.</span></div></div>'
+
+      + '<div class="form-row"><label class="form-label" for="sync-'+i+'-force_sync_calendar">Force sync (pinned day)</label>'
+      + '<div class="form-field"><input class="form-input" id="sync-'+i+'-force_sync_calendar" type="text" value="'+e(j.force_sync_calendar||"")+'" placeholder="e.g. Thu  or  Thu *-*-1..7">'
+      + '<span class="form-hint">Optional. Pin the forced sync to a day so several jobs share one drive spin-up. Overrides the days setting above.</span></div></div>'
+
+      + '<div class="form-row"><label class="form-label" for="sync-'+i+'-force_sync_max_age_days">…safety net (days)</label>'
+      + '<div class="form-field"><input class="form-input form-input-sm" id="sync-'+i+'-force_sync_max_age_days" type="number" min="1" value="'+e(j.force_sync_max_age_days||"")+'" placeholder="45">'
+      + '<span class="form-hint">Force a sync anyway after this long, so a missed pinned day cannot become “never”.</span></div></div>'
 
       + '<div class="form-subsection">'
       + '<p class="form-section-head">Trash</p>'
