@@ -186,3 +186,10 @@ NOTIFY_WEBHOOK_URL
   pass, piggybacked onto the existing nightly sync window (never triggers its
   own drive spin-up). See `INTEGRITY_DESIGN.md` for the full design and the
   guards protecting `.nase/` from Samba/filebrowser/`fix-ownership.sh`.
+- **Backlog text is written unwrapped; the reader folds legacy hard wraps.**
+  Ticket descriptions, decisions and notes are stored exactly as typed and are
+  never rewritten. Older entries were hard-wrapped at ~80 columns and render in
+  a ~64-character column, so `unwrap_prose()` (main.py, a Jinja filter) joins
+  runs of unindented prose at render time — headers, list items, indented
+  blocks and tables keep their line structure. Write new ticket text without
+  hard wraps and let the browser wrap it.

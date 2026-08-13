@@ -52,7 +52,7 @@
            still posts 'description' unchanged when nobody edits it. #}
         <div class="form-field field-readfirst">
           <div class="field-text{% if not item.description %} field-empty{% endif %}"
-               id="view-description">{{ item.description or "No description yet." }}</div>
+               id="view-description">{{ item.description | unwrap_prose or "No description yet." }}</div>
           <textarea class="form-input field-editor" id="field-description" name="description"
                     rows="6" hidden
                     style="max-width:520px; resize:vertical;">{{ item.description }}</textarea>
@@ -93,7 +93,7 @@
           </div>
           <div class="form-field field-readfirst">
             <div class="field-text{% if not item.decision %} field-empty{% endif %}"
-                 id="view-decision">{{ item.decision or "Not decided yet." }}</div>
+                 id="view-decision">{{ item.decision | unwrap_prose or "Not decided yet." }}</div>
             <textarea class="form-input field-editor" id="field-decision" name="decision"
                       rows="3" hidden
                       style="max-width:520px; resize:vertical;"
@@ -110,7 +110,7 @@
           </div>
           <div class="form-field field-readfirst">
             <div class="field-text{% if not item.implementation_details %} field-empty{% endif %}"
-                 id="view-impl">{{ item.implementation_details or "No notes yet." }}</div>
+                 id="view-impl">{{ item.implementation_details | unwrap_prose or "No notes yet." }}</div>
             <textarea class="form-input field-editor" id="field-impl" name="implementation_details"
                       rows="6" hidden
                       style="max-width:520px; resize:vertical;"

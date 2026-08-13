@@ -2,12 +2,16 @@
 import base64
 import json
 import time
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 import yaml
 
 from conftest import REPO_ROOT, make_integrity_cache, write_backlog
+
+# The live backlog, used read-only as a corpus for the fold's safety property.
+REPO_ROOT_BACKLOG = Path("/var/lib/nase/backlog.json")
 
 
 # ── read_log ───────────────────────────────────────────────────────────────────
@@ -894,3 +898,104 @@ def test_existing_items_without_a_decision_still_load(client, auth_headers, back
     r = client.get("/backlog/1", headers=auth_headers)
     assert r.status_code == 200
     assert "Not decided yet." in r.text
+
+
+# ── unwrap_prose: rendering hard-wrapped text (#22) ─────────────────────────────
+
+def _unwrap(text):
+    import modules.web.app.main as m
+    return m.unwrap_prose(text)
+
+
+def test_unwrap_joins_a_hard_wrapped_paragraph():
+    text = ("A sync_job with source /var/lib/nase/ cannot work: is_safe_mount_path\n"
+            "refuses any source that resolves to the root device, on purpose — it is\n"
+            "what stops an unmounted drive turning an rsync --delete into a wipe.")
+    assert "\n" not in _unwrap(text)
+
+
+def test_unwrap_keeps_paragraph_breaks():
+    text = "First paragraph that is long enough to have been wrapped by hand here.\n\nSecond."
+    assert _unwrap(text).count("\n\n") == 1
+
+
+def test_unwrap_leaves_section_headers_alone():
+    text = ("== Why not simply add a sync job ==\n"
+            "A line of prose that is easily long enough to look like a wrapped one.\n"
+            "== Recommended ==")
+    out = _unwrap(text)
+    assert out.startswith("== Why not simply add a sync job ==\n")
+    assert out.endswith("\n== Recommended ==")
+
+
+def test_unwrap_leaves_list_items_and_their_indents_alone():
+    text = ("  - it compares a hash cached on the SD card and exits before touching\n"
+            "    the destination when nothing changed;\n"
+            "  - it writes a latest copy plus a timestamped snapshot.")
+    assert _unwrap(text) == text
+
+
+def test_unwrap_leaves_lettered_options_alone():
+    text = ("(a) Stop hard-wrapping notes when writing them; let the browser wrap it.\n"
+            "(b) Reflow at render time, joining consecutive prose lines together.")
+    assert _unwrap(text) == text
+
+
+def test_unwrap_leaves_tables_alone():
+    text = "| viewport | result |\n| 390x844  | two rows |\n| 1200x900 | one row  |"
+    assert _unwrap(text) == text
+
+
+def test_unwrap_does_not_join_onto_a_short_line():
+    """A short line ended its paragraph deliberately; the next line starts a new
+    one even without a blank line between them."""
+    text = "Short line.\nA following line that happens to be quite a lot longer than that."
+    assert _unwrap(text) == text
+
+
+def test_unwrap_changes_only_whitespace():
+    """The one guarantee: folding may never add, drop or reorder content."""
+    import re
+    for item in json.loads(REPO_ROOT_BACKLOG.read_text())["items"] if REPO_ROOT_BACKLOG.exists() else []:
+        for field in ("description", "decision", "implementation_details"):
+            before = item.get(field) or ""
+            after = _unwrap(before)
+            assert re.sub(r"\s+", " ", before).strip() == re.sub(r"\s+", " ", after).strip()
+
+
+def test_unwrap_is_idempotent():
+    text = ("A hard-wrapped paragraph that runs past the threshold and therefore\n"
+            "continues onto a second line, and then a third one here.\n"
+            "\n"
+            "== Header ==\n"
+            "  - a list item\n")
+    once = _unwrap(text)
+    assert _unwrap(once) == once
+
+
+def test_detail_view_folds_but_the_textarea_keeps_the_stored_text(client, auth_headers, backlog_file):
+    """No migration: what is stored must survive a Save untouched, so the fold
+    applies to the rendered view only."""
+    wrapped = ("A hard-wrapped paragraph that runs past the fold threshold and so\n"
+               "continues onto a second line here.")
+    html = _detail(client, auth_headers, backlog_file, implementation_details=wrapped)
+    folded = wrapped.replace("\n", " ")
+    assert folded in html          # the rendered view
+    assert wrapped in html         # the textarea, still verbatim
+
+
+def test_unwrap_handles_crlf_from_the_form():
+    """Everything typed into the web form arrives CRLF-terminated. A \\r left
+    mid-line renders as a line break, so the fold would look like it had not
+    happened at all — which is exactly how this was found."""
+    text = ("A sync_job with source /var/lib/nase/ cannot work: is_safe_mount_path\r\n"
+            "refuses any source that resolves to the root device, on purpose.\r\n")
+    out = _unwrap(text)
+    assert "\r" not in out
+    assert out.strip() == ("A sync_job with source /var/lib/nase/ cannot work: is_safe_mount_path "
+                           "refuses any source that resolves to the root device, on purpose.")
+
+
+def test_unwrap_keeps_crlf_paragraph_breaks():
+    text = "A first paragraph long enough to have been wrapped by hand right here.\r\n\r\nSecond."
+    assert _unwrap(text).count("\n\n") == 1

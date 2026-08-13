@@ -830,6 +830,56 @@ def _section_to_yaml(value: object) -> str:
     _make_ryaml().dump(value, buf)
     return buf.getvalue()
 
+# ── Rendering hard-wrapped text ────────────────────────────────────────────────
+# Older ticket text was written wrapped at ~80 columns, but it renders in a
+# ~64-character column, so every stored line wrapped a second time and left a
+# short orphan under it. Folding those runs back into paragraphs at render time
+# fixes the existing tickets without rewriting a single one: the stored text is
+# untouched, and the editor still shows exactly what is stored.
+#
+# Deliberately conservative — only runs of unindented prose are joined. Headers,
+# list items, indented blocks and tables keep their line structure, since
+# guessing wrong there would mangle a ticket in a way nobody would notice until
+# they needed it.
+
+# A line produced by hard-wrapping is long; one deliberately left short (the end
+# of a paragraph, a heading, a one-line note) is not. 55 sits below the narrowest
+# wrap width in this backlog and above the short lines that end paragraphs.
+_MIN_WRAPPED_LEN = 55
+
+# Openers that start something of their own, so the line before must not swallow
+# them: section headers, list items, lettered options, table rows, quotes.
+_STRUCTURAL_LINE = re.compile(r"^(==|[-*+]\s|\d+[.)]\s|\(\w+\)|\||>|#)")
+
+def unwrap_prose(text: str) -> str:
+    """Join runs of hard-wrapped prose so they reflow to the reader's width."""
+    if not text:
+        return text
+    # Anything typed into the form arrives CRLF-terminated (HTML normalises
+    # textarea line breaks that way), and a stray \r left mid-line renders as a
+    # line break of its own — so the fold would appear not to have happened.
+    out: list[str] = []
+    for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        previous = out[-1] if out else ""
+        continuable = (
+            previous
+            and len(previous) >= _MIN_WRAPPED_LEN
+            and not previous.startswith((" ", "\t"))
+            and not _STRUCTURAL_LINE.match(previous)
+        )
+        absorbable = (
+            line.strip()
+            and not line.startswith((" ", "\t"))
+            and not _STRUCTURAL_LINE.match(line)
+        )
+        if continuable and absorbable:
+            out[-1] = previous + " " + line.strip()
+        else:
+            out.append(line)
+    return "\n".join(out)
+
+templates.env.filters["unwrap_prose"] = unwrap_prose
+
 def _last_leaf_holder(node) -> tuple | None:
     """The innermost container holding the last leaf of `node`, and its key.
 
