@@ -103,6 +103,20 @@ if [[ -n "$ca_schedule" ]] && command -v systemd-analyze &>/dev/null; then
     fi
 fi
 
+# The flush pin decides when a pending change is allowed to spin the drive up.
+# An unparseable spec falls back to archiving immediately (archive.sh warns),
+# so this is not silent — but it is still a typo worth catching at apply time.
+ca_flush=$(config_get '.config_archive.flush_calendar')
+ca_flush_max=$(config_get '.config_archive.flush_max_age_days')
+if [[ -n "$ca_flush" ]] && command -v systemd-analyze &>/dev/null; then
+    if ! systemd-analyze calendar "$ca_flush" &>/dev/null; then
+        fail ".config_archive.flush_calendar '${ca_flush}' is not a valid systemd calendar expression."
+    fi
+fi
+if [[ -n "$ca_flush_max" ]] && ! [[ "$ca_flush_max" =~ ^[0-9]+$ ]]; then
+    fail ".config_archive.flush_max_age_days must be a whole number of days. Got: '${ca_flush_max}'"
+fi
+
 # ── sync_jobs section ─────────────────────────────────────────────────────────
 n_jobs=$(config_len '.sync_jobs')
 declare -A seen_job_names

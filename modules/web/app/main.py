@@ -722,8 +722,16 @@ def derive_link_label(url: str) -> str:
     return label if len(label) <= 48 else label[:45] + "..."
 
 def save_backlog(data: dict) -> None:
+    """Write the backlog atomically: a reader must never see a half-written
+    file. Writing in place left a window in which the archiver (or a person
+    with `cat`) could catch a truncated JSON document — and this file is the
+    only copy of the backlog, so a torn read that then gets snapshotted would
+    be a bad thing to discover later. Rename within the same directory is
+    atomic, so readers see either the old file or the new one."""
     BACKLOG_FILE.parent.mkdir(parents=True, exist_ok=True)
-    BACKLOG_FILE.write_text(json.dumps(data, indent=2))
+    tmp = BACKLOG_FILE.with_suffix(BACKLOG_FILE.suffix + ".tmp")
+    tmp.write_text(json.dumps(data, indent=2))
+    os.replace(tmp, BACKLOG_FILE)
 
 def find_backlog_item(data: dict, item_id: int) -> dict | None:
     return next((i for i in data["items"] if i["id"] == item_id), None)

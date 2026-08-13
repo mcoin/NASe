@@ -103,18 +103,30 @@ tailscale:
 # --------------------------------------------------------------------------
 # Config archive
 # --------------------------------------------------------------------------
-# Probes /opt/nase/config.yaml for changes on a schedule and copies it to
-# dest. On each change writes dest/config.yaml (latest) and a timestamped
-# snapshot dest/<ISO-timestamp>/config.yaml for reference.
+# Archives NASe's own state files — config.yaml and the backlog — to dest.
+# On each change writes dest/<name> (latest) plus a timestamped snapshot
+# dest/<ISO-timestamp>/<name> for reference.
 # Old snapshots are pruned after retention_days.
 # schedule: systemd OnCalendar format (see sync_jobs comment below)
 # on_failure: "notify" | "ignore"
+#
+# Change detection reads hashes cached on the SD card, so a run with nothing
+# to do never touches the drive. A change is not reason enough to spin one up
+# either: config.yaml changes rarely but the backlog changes most days, so
+# pending changes are held on the SD card and flushed on flush_calendar (or
+# sooner, if the drive is found awake for another reason).
+# flush_calendar:     when to push pending changes to the drive. Same syntax
+#                     as a sync job's force_sync_calendar. Empty = write on
+#                     every change, as before.
+# flush_max_age_days: backstop so a missed flush day cannot become "never".
 # --------------------------------------------------------------------------
 config_archive:
   dest: /mnt/primary/backups/NASe
   schedule: '*-*-* 02:00:00'
   retention_days: 90
   on_failure: notify
+  flush_calendar: 'Thu'
+  flush_max_age_days: 10
 # --------------------------------------------------------------------------
 # Sync jobs
 # --------------------------------------------------------------------------
