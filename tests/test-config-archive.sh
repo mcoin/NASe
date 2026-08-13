@@ -25,6 +25,7 @@ LOGS="$WORK/logs"
 mkdir -p "$DEST" "$STAMPS" "$FAKE_REPO" "$LOGS"
 
 BACKLOG="$STAMPS/backlog.json"
+ATTACHMENTS="$STAMPS/backlog-attachments"
 TEST_CFG="$FAKE_REPO/config.yaml"
 
 TODAY_DOW=$(LC_ALL=C date +%a)
@@ -57,6 +58,7 @@ run_archive() {
     CONFIG_FILE="$TEST_CFG"              \
     NASE_STAMP_DIR="$STAMPS"             \
     NASE_BACKLOG_FILE="$BACKLOG"         \
+    NASE_ATTACHMENT_DIR="$ATTACHMENTS"   \
     NAS_LOG="$LOGS/nase.log"             \
     REPO_ROOT="$FAKE_REPO"               \
     bash "${REPO_ROOT}/modules/config-archive/archive.sh" >"$LOGS/last.log" 2>&1
@@ -166,5 +168,39 @@ before=$(snapshot_count)
 echo '{"items": [{"id": 2, "title": "another"}], "next_id": 3}' > "$BACKLOG"
 run_archive
 assert_eq "no pin: writes on change as before" "$((before + 1))" "$(snapshot_count)"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Test 9: screenshots are archived with the backlog (#20)
+# They live next to it on the SD card, so they need the same backup.
+# ─────────────────────────────────────────────────────────────────────────────
+reset; write_cfg "$TODAY_DOW"
+mkdir -p "$ATTACHMENTS/7"
+printf 'not-really-a-png' > "$ATTACHMENTS/7/1-abc.png"
+run_archive
+assert_file_exists "attachments: archived alongside the backlog" \
+    "$DEST/backlog-attachments/7/1-abc.png"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Test 10: adding a screenshot counts as a change
+# The directory is hashed by name and content, so a new file is noticed even
+# though backlog.json may be untouched.
+# ─────────────────────────────────────────────────────────────────────────────
+before=$(snapshot_count)
+: > "$LOGS/nase.log"
+run_archive
+assert_eq "attachments: unchanged dir is not a change" "$before" "$(snapshot_count)"
+printf 'another' > "$ATTACHMENTS/7/2-def.png"
+run_archive
+assert_eq "attachments: a new screenshot triggers an archive" "$((before + 1))" "$(snapshot_count)"
+assert_file_exists "attachments: the new one is in the latest copy" \
+    "$DEST/backlog-attachments/7/2-def.png"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Test 11: a deleted screenshot is a change too, and does not linger in the copy
+# ─────────────────────────────────────────────────────────────────────────────
+rm "$ATTACHMENTS/7/2-def.png"
+run_archive
+assert_file_absent "attachments: deletion propagates to the latest copy" \
+    "$DEST/backlog-attachments/7/2-def.png"
 
 test_summary

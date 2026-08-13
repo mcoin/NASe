@@ -999,3 +999,167 @@ def test_unwrap_handles_crlf_from_the_form():
 def test_unwrap_keeps_crlf_paragraph_breaks():
     text = "A first paragraph long enough to have been wrapped by hand right here.\r\n\r\nSecond."
     assert _unwrap(text).count("\n\n") == 1
+
+
+# ── Backlog attachments (#20) ───────────────────────────────────────────────────
+
+PNG_1PX = (b"\x89PNG\r\n\x1a\n" + b"\x00" * 8 + b"IHDR" + b"\x00" * 40)
+JPEG_HEAD = b"\xff\xd8\xff\xe0" + b"\x00" * 60
+GIF_HEAD = b"GIF89a" + b"\x00" * 60
+WEBP_HEAD = b"RIFF" + b"\x00\x00\x00\x00" + b"WEBP" + b"\x00" * 40
+
+
+@pytest.fixture()
+def attach_client(client, tmp_path, monkeypatch):
+    """The client fixture with attachments redirected into tmp_path, so no test
+    can write next to the real backlog."""
+    import modules.web.app.main as m
+    monkeypatch.setattr(m, "ATTACHMENT_DIR", tmp_path / "backlog-attachments")
+    return client
+
+
+def _upload(client, auth_headers, payload, filename="shot.png", content_type="image/png"):
+    return client.post("/backlog/1/attachments/add", headers=auth_headers,
+                       files={"image": (filename, payload, content_type)},
+                       follow_redirects=False)
+
+
+def _one_item(backlog_file):
+    write_backlog(backlog_file, [{"id": 1, "title": "a ticket"}])
+
+
+def test_attachment_upload_round_trip(attach_client, auth_headers, backlog_file):
+    _one_item(backlog_file)
+    assert _upload(attach_client, auth_headers, PNG_1PX).status_code == 303
+
+    item = json.loads(backlog_file.read_text())["items"][0]
+    assert len(item["attachments"]) == 1
+    a = item["attachments"][0]
+    assert a["media_type"] == "image/png"
+    assert a["bytes"] == len(PNG_1PX)
+
+    r = attach_client.get(f"/backlog/1/attachments/{a['id']}", headers=auth_headers)
+    assert r.status_code == 200
+    assert r.content == PNG_1PX
+    assert r.headers["content-type"].startswith("image/png")
+    assert r.headers["x-content-type-options"] == "nosniff"
+
+
+@pytest.mark.parametrize("payload,expected", [
+    (PNG_1PX, "image/png"), (JPEG_HEAD, "image/jpeg"),
+    (GIF_HEAD, "image/gif"), (WEBP_HEAD, "image/webp"),
+])
+def test_attachment_accepts_the_four_image_types(attach_client, auth_headers, backlog_file,
+                                                 payload, expected):
+    _one_item(backlog_file)
+    _upload(attach_client, auth_headers, payload)
+    assert json.loads(backlog_file.read_text())["items"][0]["attachments"][0]["media_type"] == expected
+
+
+def test_attachment_rejects_a_non_image_claiming_to_be_one(attach_client, auth_headers, backlog_file):
+    """The upload's Content-Type and filename are both attacker-controlled, so
+    the decision is made on the bytes."""
+    _one_item(backlog_file)
+    r = _upload(attach_client, auth_headers, b"#!/bin/sh\nrm -rf /\n",
+                filename="totally.png", content_type="image/png")
+    assert r.status_code == 303
+    assert "attach=not_an_image" in r.headers["location"]
+    # .get(): a rejected upload writes nothing at all, so the stored item never
+    # even gains the key — load_backlog() backfills it in memory only.
+    assert json.loads(backlog_file.read_text())["items"][0].get("attachments", []) == []
+
+
+def test_attachment_rejects_svg(attach_client, auth_headers, backlog_file):
+    """SVG can carry script and there is no safe way to serve it inline."""
+    _one_item(backlog_file)
+    svg = b'<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'
+    r = _upload(attach_client, auth_headers, svg, filename="x.svg", content_type="image/svg+xml")
+    assert "attach=not_an_image" in r.headers["location"]
+
+
+def test_attachment_enforces_the_size_cap(attach_client, auth_headers, backlog_file):
+    import modules.web.app.main as m
+    _one_item(backlog_file)
+    too_big = PNG_1PX + b"\x00" * (m.MAX_ATTACHMENT_BYTES + 1)
+    r = _upload(attach_client, auth_headers, too_big)
+    assert "attach=too_big" in r.headers["location"]
+    assert json.loads(backlog_file.read_text())["items"][0].get("attachments", []) == []
+
+
+def test_attachment_enforces_the_count_cap(attach_client, auth_headers, backlog_file):
+    import modules.web.app.main as m
+    _one_item(backlog_file)
+    for _ in range(m.MAX_ATTACHMENTS_PER_ITEM):
+        _upload(attach_client, auth_headers, PNG_1PX)
+    r = _upload(attach_client, auth_headers, PNG_1PX)
+    assert "attach=too_many" in r.headers["location"]
+    assert len(json.loads(backlog_file.read_text())["items"][0]["attachments"]) == \
+        m.MAX_ATTACHMENTS_PER_ITEM
+
+
+def test_attachment_serving_requires_auth(attach_client, auth_headers, backlog_file):
+    """These do not live under the unauthenticated /static mount for this reason."""
+    _one_item(backlog_file)
+    _upload(attach_client, auth_headers, PNG_1PX)
+    aid = json.loads(backlog_file.read_text())["items"][0]["attachments"][0]["id"]
+    assert attach_client.get(f"/backlog/1/attachments/{aid}").status_code == 401
+
+
+def test_attachment_stored_name_is_generated_not_the_upload_name(attach_client, auth_headers,
+                                                                 backlog_file):
+    _one_item(backlog_file)
+    _upload(attach_client, auth_headers, PNG_1PX, filename="../../etc/passwd.png")
+    a = json.loads(backlog_file.read_text())["items"][0]["attachments"][0]
+    assert "/" not in a["stored_name"]
+    assert ".." not in a["stored_name"]
+    assert a["stored_name"].endswith(".png")
+
+
+def test_attachment_delete_removes_the_file(attach_client, auth_headers, backlog_file, tmp_path):
+    _one_item(backlog_file)
+    _upload(attach_client, auth_headers, PNG_1PX)
+    a = json.loads(backlog_file.read_text())["items"][0]["attachments"][0]
+    path = tmp_path / "backlog-attachments" / "1" / a["stored_name"]
+    assert path.is_file()
+
+    attach_client.post("/backlog/1/attachments/remove", headers=auth_headers,
+                       data={"attachment_id": str(a["id"])}, follow_redirects=False)
+    assert not path.exists()
+    assert json.loads(backlog_file.read_text())["items"][0]["attachments"] == []
+
+
+def test_attachments_survive_an_ordinary_save(attach_client, auth_headers, backlog_file):
+    """The trap from #19, #3 and #23: the update rewrites the item from the
+    submitted fields, and the edit form knows nothing about attachments."""
+    _one_item(backlog_file)
+    _upload(attach_client, auth_headers, PNG_1PX)
+    attach_client.post("/backlog/1", headers=auth_headers, follow_redirects=False,
+                       data={"title": "a ticket", "type": "feature", "status": "ready",
+                             "description": "d", "decision": "", "implementation_details": ""})
+    assert len(json.loads(backlog_file.read_text())["items"][0]["attachments"]) == 1
+
+
+def test_detail_page_shows_the_thumbnail_and_the_upload_form(attach_client, auth_headers,
+                                                             backlog_file):
+    _one_item(backlog_file)
+    _upload(attach_client, auth_headers, PNG_1PX)
+    html = attach_client.get("/backlog/1", headers=auth_headers).text
+    assert 'enctype="multipart/form-data"' in html
+    assert 'accept="image/*"' in html          # phones offer the camera for this
+    assert "/backlog/1/attachments/1" in html
+
+
+def test_detail_page_reports_a_rejected_upload(attach_client, auth_headers, backlog_file):
+    _one_item(backlog_file)
+    html = attach_client.get("/backlog/1?attach=too_big", headers=auth_headers).text
+    assert "larger than 4 MB" in html
+
+
+def test_missing_attachment_file_is_a_404_not_a_crash(attach_client, auth_headers, backlog_file,
+                                                      tmp_path):
+    _one_item(backlog_file)
+    _upload(attach_client, auth_headers, PNG_1PX)
+    a = json.loads(backlog_file.read_text())["items"][0]["attachments"][0]
+    (tmp_path / "backlog-attachments" / "1" / a["stored_name"]).unlink()
+    r = attach_client.get(f"/backlog/1/attachments/{a['id']}", headers=auth_headers)
+    assert r.status_code == 404

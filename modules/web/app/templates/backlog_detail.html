@@ -130,6 +130,51 @@
 
 <div class="card">
   <div class="card-head">
+    <span>Screenshots</span>
+    {% if item.attachments %}<span class="form-hint">{{ item.attachments|length }} of 10</span>{% endif %}
+  </div>
+  <div class="form-body">
+
+    {% if item.attachments %}
+    <ul class="attachment-strip">
+      {% for a in item.attachments %}
+      <li class="attachment">
+        {# Click through to the full-size image; the thumbnail is the same file
+           scaled by the browser, since these are capped at 4 MB anyway. #}
+        <a href="/backlog/{{ item.id }}/attachments/{{ a.id }}" target="_blank" rel="noopener">
+          <img src="/backlog/{{ item.id }}/attachments/{{ a.id }}" alt="{{ a.filename }}" loading="lazy">
+        </a>
+        <div class="attachment-meta">
+          <span class="attachment-name" title="{{ a.filename }}">{{ a.filename }}</span>
+          <form method="post" action="/backlog/{{ item.id }}/attachments/remove">
+            <input type="hidden" name="attachment_id" value="{{ a.id }}">
+            <button type="submit" class="btn-remove" title="Delete this image"
+                    onclick="return confirm('Delete this image? This one really is deleted.')">&times;</button>
+          </form>
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <div class="changes-empty">No screenshots yet.</div>
+    {% endif %}
+
+    {% if attach_error %}<p class="form-hint attachment-error">{{ attach_error }}</p>{% endif %}
+
+    {# accept="image/*" is what makes a phone offer Take Photo / Photo Library,
+       which is where these screenshots come from. #}
+    <form method="post" action="/backlog/{{ item.id }}/attachments/add"
+          enctype="multipart/form-data" class="attachment-add">
+      <input type="file" name="image" accept="image/*" required>
+      <button type="submit" class="btn-save">+ Add image</button>
+    </form>
+    <p class="form-hint">PNG, JPEG, GIF or WebP, up to 4 MB each, 10 per ticket.</p>
+
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-head">
     <span>Related tickets</span>
   </div>
   <div class="form-body">

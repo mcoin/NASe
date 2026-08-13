@@ -40,6 +40,7 @@ PENDING_FILE="${STAMP_DIR}/config-archive-pending.stamp"
 SOURCES=(
     "config.yaml=${REPO_ROOT}/config.yaml"
     "backlog.json=${NASE_BACKLOG_FILE:-${STAMP_DIR}/backlog.json}"
+    "backlog-attachments=${NASE_ATTACHMENT_DIR:-${STAMP_DIR}/backlog-attachments}"
 )
 
 # ── Which sources changed since the last archive? ────────────────────────────
@@ -48,10 +49,23 @@ SOURCES=(
 changed_names=()
 declare -A source_path_of source_hash_of
 
+# hash_source <path> — one hash covering a file, or a directory's whole content.
+# Directory hashing walks names and bytes so a renamed or deleted screenshot is
+# a change too, not just an edited one.
+hash_source() {
+    local path="$1"
+    if [[ -d "$path" ]]; then
+        find "$path" -type f -print0 2>/dev/null | sort -z \
+            | xargs -0 -r sha256sum 2>/dev/null | sha256sum | cut -d' ' -f1
+    else
+        sha256sum "$path" | cut -d' ' -f1
+    fi
+}
+
 for entry in "${SOURCES[@]}"; do
     name="${entry%%=*}"
     path="${entry#*=}"
-    [[ -f "$path" ]] || continue
+    [[ -e "$path" ]] || continue
 
     # A truncated file must never be promoted over a good snapshot. JSON is
     # the case that matters (the web app rewrites the backlog under a person's
@@ -61,7 +75,7 @@ for entry in "${SOURCES[@]}"; do
                     || { log_warn "Source '${name}' is not valid JSON right now — skipping it this run."; continue; } ;;
     esac
 
-    hash=$(sha256sum "$path" | cut -d' ' -f1)
+    hash=$(hash_source "$path")
     hash_file="${STAMP_DIR}/config-archive-hash-${name}.stamp"
     # Migration: the old single-file stamp only ever covered config.yaml.
     if [[ "$name" == "config.yaml" && ! -f "$hash_file" && -f "${STAMP_DIR}/config-archive-hash.stamp" ]]; then
@@ -162,8 +176,17 @@ while [[ -e "$snap" ]]; do
 done
 mkdir -p "$snap"
 for name in "${!source_path_of[@]}"; do
-    cp "${source_path_of[$name]}" "${snap}/${name}"
-    cp "${source_path_of[$name]}" "${DEST}/${name}"
+    src="${source_path_of[$name]}"
+    if [[ -d "$src" ]]; then
+        # -T so the copy lands as <dest>/<name>, not nested inside an existing
+        # directory of that name on the second run.
+        cp -aT "$src" "${snap}/${name}"
+        rm -rf "${DEST:?}/${name}"
+        cp -aT "$src" "${DEST}/${name}"
+    else
+        cp "$src" "${snap}/${name}"
+        cp "$src" "${DEST}/${name}"
+    fi
 done
 log_ok "Archived ${#source_path_of[@]} file(s) → ${snap}/"
 
