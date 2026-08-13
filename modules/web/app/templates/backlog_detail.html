@@ -81,6 +81,26 @@
 
       <div class="form-subsection">
         <p class="form-section-head">Implementation details</p>
+
+        {# The conclusion sits above the analysis it summarises, so picking a
+           ticket up does not mean reading the whole comparison first. #}
+        <div class="form-row">
+          <div class="form-label form-label-row">
+            <label for="field-decision">Decision</label>
+            <button type="button" class="win-btn field-edit-toggle"
+                    data-editor="field-decision" data-view="view-decision"
+                    data-empty="Not decided yet.">Edit</button>
+          </div>
+          <div class="form-field field-readfirst">
+            <div class="field-text{% if not item.decision %} field-empty{% endif %}"
+                 id="view-decision">{{ item.decision or "Not decided yet." }}</div>
+            <textarea class="form-input field-editor" id="field-decision" name="decision"
+                      rows="3" hidden
+                      style="max-width:520px; resize:vertical;"
+                      placeholder="What to do, in a sentence or two — the notes below hold the options.">{{ item.decision }}</textarea>
+          </div>
+        </div>
+
         <div class="form-row">
           <div class="form-label form-label-row">
             <label for="field-impl">Notes</label>

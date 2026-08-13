@@ -709,7 +709,8 @@ def test_detail_empty_fields_show_a_muted_placeholder(client, auth_headers, back
 
 def test_detail_non_empty_field_has_no_empty_placeholder_class(client, auth_headers, backlog_file):
     html = _detail(client, auth_headers, backlog_file,
-                   description="something", implementation_details="something else")
+                   description="something", decision="something decided",
+                   implementation_details="something else")
     # "field-empty" also appears in the toggle script, so check the class
     # actually applied to the rendered views rather than the whole page.
     assert "field-text field-empty" not in html
@@ -720,8 +721,10 @@ def test_detail_edit_toggle_points_at_both_nodes(client, auth_headers, backlog_f
     assert 'data-editor="field-description"' in html
     assert 'data-view="view-description"' in html
     assert 'data-editor="field-impl"' in html
-    # The toggle shares the label's line rather than taking a row of its own.
-    assert html.count("form-label-row") == 2
+    assert 'data-editor="field-decision"' in html
+    # One per read-first field (description, decision, notes); the toggle shares
+    # the label's line rather than taking a row of its own.
+    assert html.count("form-label-row") == 3
 
 
 def test_saving_untouched_fields_keeps_their_value(client, auth_headers, backlog_file):
@@ -837,3 +840,57 @@ def test_reanchor_survives_empty_and_scalar_sections():
     doc = ry.load("a: 1\nb: {}\nc: []\n\n# block\nd:\n  x: 1\n")
     m._reanchor_section_comments(doc)   # must not raise
     assert list(doc.keys()) == ["a", "b", "c", "d"]
+
+
+# ── Backlog detail: Decision field ──────────────────────────────────────────────
+
+def test_detail_renders_decision_read_first(client, auth_headers, backlog_file):
+    html = _detail(client, auth_headers, backlog_file, decision="Go with option (b).")
+    assert 'id="view-decision"' in html
+    assert 'data-editor="field-decision"' in html
+    assert html.count("Go with option (b).") == 2   # rendered view + textarea
+
+
+def test_detail_empty_decision_shows_placeholder(client, auth_headers, backlog_file):
+    html = _detail(client, auth_headers, backlog_file)
+    assert "Not decided yet." in html
+
+
+def test_decision_sits_above_the_notes(client, auth_headers, backlog_file):
+    """The point of the field: the conclusion is visible before the analysis."""
+    html = _detail(client, auth_headers, backlog_file,
+                   decision="Go with (b).", implementation_details=LONG_NOTES)
+    assert html.index('id="view-decision"') < html.index('id="view-impl"')
+
+
+def test_saving_a_decision_persists_it(client, auth_headers, backlog_file):
+    write_backlog(backlog_file, [{"id": 1, "title": "a ticket"}])
+    r = client.post("/backlog/1", headers=auth_headers, follow_redirects=False,
+                    data={"title": "a ticket", "type": "feature", "status": "ready",
+                          "description": "", "decision": "Do the cheap one first.",
+                          "implementation_details": ""})
+    assert r.status_code == 303
+    assert json.loads(backlog_file.read_text())["items"][0]["decision"] == "Do the cheap one first."
+
+
+def test_decision_survives_an_ordinary_save(client, auth_headers, backlog_file):
+    """Same trap as #19/#3: the update rewrites the item from the submitted
+    fields, so a field the form forgets to send is silently blanked."""
+    write_backlog(backlog_file, [{"id": 1, "title": "a ticket",
+                                  "decision": "keep me", "description": "d"}])
+    html = client.get("/backlog/1", headers=auth_headers).text
+    assert 'name="decision"' in html          # the form does submit it
+    client.post("/backlog/1", headers=auth_headers, follow_redirects=False,
+                data={"title": "a ticket", "type": "feature", "status": "open",
+                      "description": "d", "decision": "keep me",
+                      "implementation_details": ""})
+    assert json.loads(backlog_file.read_text())["items"][0]["decision"] == "keep me"
+
+
+def test_existing_items_without_a_decision_still_load(client, auth_headers, backlog_file):
+    """Items written before the field existed have no 'decision' key at all."""
+    backlog_file.write_text(json.dumps({"items": [{"id": 1, "title": "old", "status": "open"}],
+                                        "next_id": 2}))
+    r = client.get("/backlog/1", headers=auth_headers)
+    assert r.status_code == 200
+    assert "Not decided yet." in r.text

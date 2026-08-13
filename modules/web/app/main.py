@@ -676,6 +676,10 @@ def load_backlog() -> dict:
         item.setdefault("type", "feature")
         item.setdefault("status", "open")
         item.setdefault("description", "")
+        # What was decided, distilled from the options weighed in
+        # implementation_details — so picking a ticket up does not mean
+        # re-reading the comparison to infer its outcome.
+        item.setdefault("decision", "")
         item.setdefault("implementation_details", "")
         item.setdefault("links", [])
         item.setdefault("comments", [])
@@ -1233,6 +1237,7 @@ async def backlog_update(request: Request, item_id: int):
             item["title"] = title
         item["type"] = type_
         item["description"] = form.get("description") or ""
+        item["decision"] = form.get("decision") or ""
         item["implementation_details"] = form.get("implementation_details") or ""
         item["status"] = status
         save_backlog(data)
