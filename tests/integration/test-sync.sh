@@ -264,6 +264,27 @@ run_sync
 DETECTED=$(grep "changes detected" "$LOGS/nase.log" || true)
 assert_contains "future mtime: still fires on the next run" "tomorrow.txt" "$DETECTED"
 
+# ...and it must be called out as a future date, not just named. Asserted
+# against the WARN line alone: the detection line above already contains both
+# the filename and the word "mtime", so grepping the whole log would pass
+# whether or not the warning exists.
+WARNED=$(grep "WARN" "$LOGS/nase.log" | grep "future" || true)
+assert_contains "future mtime: warns that the date is in the future" "tomorrow.txt" "$WARNED"
+assert_contains "future mtime: warning explains the nightly no-op"   "transfers nothing" "$WARNED"
+
+# A normal recent mtime must not trip the warning, or it becomes noise that
+# gets filtered out and stops meaning anything.
+reset; write_cfg
+echo "hello" > "$SRC/file1.txt"
+touch -d "1 minute ago" "$SRC/file1.txt"
+run_sync
+echo "changed" > "$SRC/trigger.txt"
+touch -d "1 minute ago" "$SRC"
+: > "$LOGS/nase.log"
+run_sync
+WARNED=$(grep "WARN" "$LOGS/nase.log" | grep "future" || true)
+assert_empty "past mtime: no future-date warning" "$WARNED"
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Test 11: The skip line reports how old the stamp is
 # Without it there is no way to tell a job that skipped yesterday from one that

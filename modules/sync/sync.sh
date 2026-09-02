@@ -106,12 +106,26 @@ if [[ -f "$STAMP_FILE" ]]; then
         # while rsync then transfers nothing is otherwise indistinguishable
         # from one with real changes, and that is exactly the state this
         # machine has been in (see backlog #4). find has just read the entry,
-        # so asking for its mtime costs no extra drive access — and a
-        # timestamp in the future, which no stamp file can ever overtake,
-        # becomes obvious instead of needing a manual hunt while the drive
-        # happens to be awake.
-        changed_mtime=$(stat -c '%y' "$changed" 2>/dev/null || echo "unknown")
+        # so asking for its mtime costs no extra drive access.
+        # One stat, both forms: the epoch to compare against, the human form to log.
+        changed_epoch=0
+        changed_mtime="unknown"
+        if changed_stat=$(stat -c '%Y %y' "$changed" 2>/dev/null); then
+            changed_epoch="${changed_stat%% *}"
+            changed_mtime="${changed_stat#* }"
+        fi
         log_info "Sync job '${JOB_NAME}': changes detected — '${changed}' (mtime ${changed_mtime}; stamp ${stamp_age_days}d old)."
+
+        # A source entry dated in the future is never overtaken by the stamp
+        # file, so detection fires on every single run for as long as the
+        # timestamp stands: both drives wake, rsync walks the tree and
+        # transfers nothing. Say so rather than correcting it — an mtime is
+        # the user's data, and a job silently rewriting timestamps under
+        # /mnt/primary to quiet its own logging would be far worse than the
+        # nightly wake it fixes. See backlog #4.
+        if [[ "$changed_epoch" -gt "$(date +%s)" ]]; then
+            log_warn "Sync job '${JOB_NAME}': '${changed}' is dated in the future (${changed_mtime}) — change detection will fire on every run until that timestamp is corrected, waking the drives for a sync that transfers nothing."
+        fi
     else
         # No changes detected — decide whether this run is a forced one.
         force_sync=false
