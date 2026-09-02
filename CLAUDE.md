@@ -11,10 +11,22 @@ live system match the config idempotently.
 ## Hardware
 
 - Raspberry Pi running Debian/Ubuntu (aarch64)
-- `/dev/sda` → primary drive (1.8 TB, ext4, `/mnt/primary`)
-- `/dev/sdb` → backup1 (224 GB, ext4, `/mnt/backup1`, normally read-only)
-- `/dev/sdc` → backup2 (239 GB, ext4, `/mnt/backup2`, normally read-only)
+- `/dev/sda` → primary drive (1.8 TB, ext4, `/mnt/primary`, `role: main`)
+- `/dev/sdb` → backup_daily (ext4, `/mnt/backup_daily`, `role: backup`, normally read-only)
 - SD card → OS root (`/`)
+
+`config.yaml` is authoritative for drive names and mountpoints; the above is
+what it currently declares. Note that `/mnt/backup1` and `/mnt/backup2` are
+*stale directories on the SD card* left over from an earlier layout, not
+mountpoints. `findmnt --target /mnt/backup1` therefore resolves up to the root
+device — which is exactly the trap `lib/guards.sh` (`is_safe_mount_path`)
+exists to catch. Any new code that walks or writes under a drive's mountpoint
+must go through that guard.
+
+`hdparm -C /dev/sda` always answers `unknown`: the USB-SATA bridge does not
+implement ATA CHECK POWER MODE. Never treat that as "awake" — ask
+`modules/drives/spin_status.sh <name>`, which falls back to inferring state
+from `/sys/block/<disk>/stat` and reports `estimated`.
 
 ## Repository layout
 
@@ -138,7 +150,7 @@ sudo nase integrity bootstrap <name> [limit]
 | Path | Purpose |
 |------|---------|
 | `/mnt/primary` | Main data drive |
-| `/mnt/backup1`, `/mnt/backup2` | Backup drives (read-only at rest) |
+| `/mnt/backup_daily` | Backup drive (read-only at rest) |
 | `<mountpoint>/.nase/` | Per-drive checksum integrity manifest (root:root 0700 — see INTEGRITY_DESIGN.md) |
 | `/srv/filebrowser` | Virtual root: bind-mounts of primary shares + Backup/Trash |
 | `/var/lib/nase/` | Stamp files: `sync-<job>.stamp`, `web-app.hash` |
