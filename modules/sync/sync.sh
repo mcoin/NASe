@@ -10,6 +10,7 @@ source "${REPO_ROOT}/lib/log.sh"
 source "${REPO_ROOT}/lib/config.sh"
 source "${REPO_ROOT}/lib/guards.sh"
 source "${REPO_ROOT}/lib/calendar.sh"
+source "${REPO_ROOT}/lib/watch.sh"
 
 JOB_NAME="${1:-}"
 [[ -n "$JOB_NAME" ]] || die "Usage: sync.sh <job-name>"
@@ -99,34 +100,84 @@ if [[ -f "$STAMP_FILE" ]]; then
     # Guard against negative age (e.g. clock correction)
     [[ $stamp_age_days -lt 0 ]] && stamp_age_days=0
 
-    # -print -quit exits on the first match — fast even on large trees
-    changed=$(find "$source_path" -newer "$STAMP_FILE" -print -quit 2>/dev/null)
+    # ── Decide from the SD card if the watcher can vouch for the window ───────
+    # The find below walks the source tree, which wakes the primary drive every
+    # night even when nothing has changed and every job then skips — the second
+    # half of backlog #4. modules/primary-watch/record.sh already records every
+    # change under /mnt/primary to the SD card, so ask that first and only pay
+    # for a drive read when it cannot answer with confidence.
+    #
+    # The window starts at the detection cursor, not the sync stamp. The stamp
+    # only moves when rsync actually runs, so after a watcher restart — which
+    # every apply.sh causes — the gap marker would sit after the stamp for as
+    # long as nothing happened to sync, and detection would fall back to
+    # scanning the drive every night until the next forced run. The cursor
+    # records something weaker but sufficient: the last moment at which this
+    # job's source was *confirmed* unchanged, however that was established.
+    # Anything before it has already been accounted for.
+    CURSOR_FILE="${STAMP_DIR}/detect-${JOB_NAME}.cursor"
+    window_start="$stamp_mtime"
+    if [[ -f "$CURSOR_FILE" ]]; then
+        cursor_mtime=$(stat -c %Y "$CURSOR_FILE" 2>/dev/null || echo "0")
+        (( cursor_mtime > window_start )) && window_start="$cursor_mtime"
+    fi
+
+    detection_source="find"
+    if vouch_failure=$(watch_vouch_failure "$window_start"); then
+        detection_source="watcher"
+        changed_event=$(watch_first_event_since "$window_start" "$source_path")
+        changed="$(cut -f3 <<< "$changed_event")"
+    else
+        # Not an error — just means the log cannot prove the window was
+        # observed, so we fall back rather than risk skipping a real change.
+        log_info "Sync job '${JOB_NAME}': event log cannot vouch for the window (${vouch_failure}) — falling back to scanning the source."
+    fi
+
+    if [[ "$detection_source" == "find" ]]; then
+        # -print -quit exits on the first match — fast even on large trees
+        changed=$(find "$source_path" -newer "$STAMP_FILE" -print -quit 2>/dev/null)
+    fi
     if [[ -n "$changed" ]]; then
         # Name what triggered the run. A job whose detection fires every night
         # while rsync then transfers nothing is otherwise indistinguishable
         # from one with real changes, and that is exactly the state this
-        # machine has been in (see backlog #4). find has just read the entry,
-        # so asking for its mtime costs no extra drive access.
-        # One stat, both forms: the epoch to compare against, the human form to log.
-        changed_epoch=0
-        changed_mtime="unknown"
-        if changed_stat=$(stat -c '%Y %y' "$changed" 2>/dev/null); then
-            changed_epoch="${changed_stat%% *}"
-            changed_mtime="${changed_stat#* }"
-        fi
-        log_info "Sync job '${JOB_NAME}': changes detected — '${changed}' (mtime ${changed_mtime}; stamp ${stamp_age_days}d old)."
+        # machine has been in (see backlog #4).
+        if [[ "$detection_source" == "watcher" ]]; then
+            # The event log already carries when and what, and it came off the
+            # SD card — stat'ing the path here just to log its mtime would put
+            # back the drive read this whole change exists to remove.
+            log_info "Sync job '${JOB_NAME}': changes detected from event log — '${changed}' ($(cut -f2 <<< "$changed_event") at $(cut -f1 <<< "$changed_event"); stamp ${stamp_age_days}d old)."
+        else
+            # find has just read the entry, so asking for its mtime costs no
+            # extra drive access. One stat, both forms: the epoch to compare
+            # against, the human form to log.
+            changed_epoch=0
+            changed_mtime="unknown"
+            if changed_stat=$(stat -c '%Y %y' "$changed" 2>/dev/null); then
+                changed_epoch="${changed_stat%% *}"
+                changed_mtime="${changed_stat#* }"
+            fi
+            log_info "Sync job '${JOB_NAME}': changes detected — '${changed}' (mtime ${changed_mtime}; stamp ${stamp_age_days}d old)."
 
-        # A source entry dated in the future is never overtaken by the stamp
-        # file, so detection fires on every single run for as long as the
-        # timestamp stands: both drives wake, rsync walks the tree and
-        # transfers nothing. Say so rather than correcting it — an mtime is
-        # the user's data, and a job silently rewriting timestamps under
-        # /mnt/primary to quiet its own logging would be far worse than the
-        # nightly wake it fixes. See backlog #4.
-        if [[ "$changed_epoch" -gt "$(date +%s)" ]]; then
-            log_warn "Sync job '${JOB_NAME}': '${changed}' is dated in the future (${changed_mtime}) — change detection will fire on every run until that timestamp is corrected, waking the drives for a sync that transfers nothing."
+            # A source entry dated in the future is never overtaken by the stamp
+            # file, so detection fires on every single run for as long as the
+            # timestamp stands: both drives wake, rsync walks the tree and
+            # transfers nothing. Say so rather than correcting it — an mtime is
+            # the user's data, and a job silently rewriting timestamps under
+            # /mnt/primary to quiet its own logging would be far worse than the
+            # nightly wake it fixes. See backlog #4.
+            if [[ "$changed_epoch" -gt "$(date +%s)" ]]; then
+                log_warn "Sync job '${JOB_NAME}': '${changed}' is dated in the future (${changed_mtime}) — change detection will fire on every run until that timestamp is corrected, waking the drives for a sync that transfers nothing."
+            fi
         fi
     else
+        # Source confirmed unchanged as of now, by whichever method. Record it
+        # so the next run only has to account for the time since this moment —
+        # see the cursor rationale above. Written before the forced-sync
+        # decision because it is a statement about the source, not about
+        # whether we are going to sync anyway.
+        touch "$CURSOR_FILE" 2>/dev/null || true
+
         # No changes detected — decide whether this run is a forced one.
         force_sync=false
         force_mode="days"
@@ -163,7 +214,11 @@ if [[ -f "$STAMP_FILE" ]]; then
         fi
 
         if [[ "$force_sync" == "false" ]]; then
-            log_info "Sync job '${JOB_NAME}': no changes since last sync (stamp ${stamp_age_days}d old) — skipping."
+            # Naming the source matters: "no changes" from the event log means
+            # the drive was never touched, while "no changes" from find means
+            # it was woken to reach that conclusion. Telling them apart in the
+            # log is how phase 2 gets measured.
+            log_info "Sync job '${JOB_NAME}': no changes since last sync via ${detection_source} (stamp ${stamp_age_days}d old) — skipping."
             exit 0
         fi
     fi

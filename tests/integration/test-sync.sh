@@ -380,4 +380,150 @@ LOG_OUT=$(cat "$LOGS/nase.log")
 assert_contains  "calendar: invalid spec warns"            "not a valid systemd calendar" "$LOG_OUT"
 assert_file_absent "calendar: invalid spec falls back to force_sync_days" "$DST/canary.txt"
 
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Change detection from the primary-watch event log (backlog #4 phase 2 opt A)
+#
+# The point of this path is that a quiet night costs no drive access at all.
+# So the decisive assertion is not "it noticed a change" but the opposite: a
+# file that `find -newer` *would* have caught must be ignored when the event
+# log says nothing happened. That can only pass if the source was never walked.
+# ═════════════════════════════════════════════════════════════════════════════
+EVENTS="$STAMPS/primary-events.log"
+
+# Seed an event log the watcher could plausibly have written: coverage starting
+# an hour ago, a heartbeat just now, and whatever lines the caller adds.
+seed_events() {
+    mkdir -p "$STAMPS"
+    {
+        date -d '1 hour ago' '+%Y-%m-%d %H:%M:%S'    | tr -d '\n'; printf '\t__heartbeat__\t-\n'
+        for extra in "$@"; do printf '%s\n' "$extra"; done
+        date '+%Y-%m-%d %H:%M:%S'                    | tr -d '\n'; printf '\t__heartbeat__\t-\n'
+    } > "$EVENTS"
+}
+ev() { printf '%s\t%s\t%s' "$(date -d "$1" '+%Y-%m-%d %H:%M:%S')" "$2" "$3"; }
+
+# ── Quiet watcher: source is never scanned ────────────────────────────────────
+reset; write_cfg
+echo "hello" > "$SRC/file1.txt"; touch -d "1 minute ago" "$SRC/file1.txt"
+run_sync                                    # creates the stamp
+echo "invisible" > "$SRC/unlogged.txt"      # newer than the stamp -> find WOULD see it
+seed_events                                 # ...but the event log knows nothing
+: > "$LOGS/nase.log"
+run_sync
+SKIP=$(grep "no changes since last sync" "$LOGS/nase.log" || true)
+assert_contains "watcher: quiet log means skip"          "skipping"    "$SKIP"
+assert_contains "watcher: skip names the event log"      "via watcher" "$SKIP"
+assert_not_contains "watcher: the source was not walked" "unlogged.txt" \
+    "$(cat "$LOGS/nase.log")"
+
+# ── A logged event is detected, and named from the log ────────────────────────
+reset; write_cfg
+echo "hello" > "$SRC/file1.txt"; touch -d "1 minute ago" "$SRC/file1.txt"
+run_sync
+seed_events "$(ev 'now' modify "$SRC/real.txt")"
+: > "$LOGS/nase.log"
+run_sync
+DET=$(grep "changes detected" "$LOGS/nase.log" || true)
+assert_contains "watcher: detects a logged event"        "real.txt"       "$DET"
+assert_contains "watcher: says it came from the log"     "from event log" "$DET"
+
+# ── An event outside this job's source must not trigger it ────────────────────
+reset; write_cfg
+echo "hello" > "$SRC/file1.txt"; touch -d "1 minute ago" "$SRC/file1.txt"
+run_sync
+seed_events "$(ev 'now' modify "/somewhere/else/other.txt")"
+: > "$LOGS/nase.log"
+run_sync
+assert_contains "watcher: ignores events outside the source" "skipping" \
+    "$(grep 'no changes since last sync' "$LOGS/nase.log" || true)"
+
+# ── Cannot vouch -> fall back to find, and say why ────────────────────────────
+# Each of these is a way the log could lie by omission. Falling back costs a
+# drive read; trusting it would silently stop syncing, so the bias is correct.
+reset; write_cfg
+echo "hello" > "$SRC/file1.txt"; touch -d "1 minute ago" "$SRC/file1.txt"
+run_sync
+echo "real change" > "$SRC/found-by-find.txt"
+touch -d "1 minute ago" "$SRC"   # else find reports the parent dir, not the file
+seed_events "$(ev 'now' __gap__ 'watcher started')"
+: > "$LOGS/nase.log"
+run_sync
+assert_contains "gap in window: falls back to find" "falling back to scanning" \
+    "$(cat "$LOGS/nase.log")"
+assert_contains "gap in window: the fallback finds the change" "found-by-find.txt" \
+    "$(grep 'changes detected' "$LOGS/nase.log" || true)"
+
+# A watcher that has not spoken in hours may be dead; silence is not evidence.
+reset; write_cfg
+echo "hello" > "$SRC/file1.txt"; touch -d "1 minute ago" "$SRC/file1.txt"
+run_sync
+echo "real change" > "$SRC/stale-case.txt"
+{ date -d '3 hours ago' '+%Y-%m-%d %H:%M:%S' | tr -d '\n'; printf '\t__heartbeat__\t-\n'; } > "$EVENTS"
+: > "$LOGS/nase.log"
+run_sync
+assert_contains "stale watcher: falls back to find" "may be dead" "$(cat "$LOGS/nase.log")"
+
+# No log at all (fresh install, or the watcher never started).
+reset; write_cfg
+echo "hello" > "$SRC/file1.txt"; touch -d "1 minute ago" "$SRC/file1.txt"
+run_sync
+echo "real change" > "$SRC/nolog.txt"
+touch -d "1 minute ago" "$SRC"   # else find reports the parent dir, not the file
+rm -f "$EVENTS"
+: > "$LOGS/nase.log"
+run_sync
+assert_contains "missing log: falls back to find" "not readable" "$(cat "$LOGS/nase.log")"
+assert_contains "missing log: the fallback finds the change" "nolog.txt" \
+    "$(grep 'changes detected' "$LOGS/nase.log" || true)"
+
+# Log that starts after the stamp cannot describe the whole window.
+reset; write_cfg
+echo "hello" > "$SRC/file1.txt"; touch -d "1 minute ago" "$SRC/file1.txt"
+run_sync
+echo "real change" > "$SRC/short-log.txt"
+# Age the stamp explicitly. Both timestamps have one-second resolution, so a
+# stamp written in the same second as the log's first line would compare equal
+# and the log would appear to cover the window.
+touch -d "10 minutes ago" "$STAMPS/sync-${JOB}.stamp"
+{ date '+%Y-%m-%d %H:%M:%S' | tr -d '\n'; printf '\t__heartbeat__\t-\n'; } > "$EVENTS"
+: > "$LOGS/nase.log"
+run_sync
+assert_contains "log younger than stamp: falls back" "window not covered" \
+    "$(cat "$LOGS/nase.log")"
+
+
+# ── The detection cursor survives a watcher restart ───────────────────────────
+# Every apply.sh restarts the watcher, which writes a __gap__. Without a cursor
+# that gap sits after the sync stamp until something actually syncs, so every
+# night would fall back to scanning the drive — exactly the cost phase 2 exists
+# to remove. The cursor records "confirmed unchanged at T" independently of
+# whether rsync ran.
+reset; write_cfg
+echo "hello" > "$SRC/file1.txt"; touch -d "1 minute ago" "$SRC/file1.txt"
+run_sync                                        # stamp created
+# Age the whole source tree, not just the stamp: creating file1.txt bumped the
+# directory's mtime, and find reports the directory — night one would detect a
+# "change", sync, and move the stamp past the gap, making night two pass for
+# entirely the wrong reason.
+quiesce "30 minutes ago" "10 minutes ago"
+rm -f "$STAMPS/detect-${JOB}.cursor"
+
+# Night one: a gap after the stamp forces the fallback, which finds nothing.
+seed_events "$(ev '5 minutes ago' __gap__ 'watcher started')"
+: > "$LOGS/nase.log"
+run_sync
+assert_contains "cursor: night one falls back past the gap" "falling back to scanning" \
+    "$(cat "$LOGS/nase.log")"
+assert_file_exists "cursor: written after a clean detection" "$STAMPS/detect-${JOB}.cursor"
+
+# Night two: same gap, still older than the stamp — but now the cursor is newer
+# than it, so the watcher can vouch and the drive is not touched.
+: > "$LOGS/nase.log"
+run_sync
+SKIP2=$(grep "no changes since last sync" "$LOGS/nase.log" || true)
+assert_contains "cursor: night two uses the watcher" "via watcher" "$SKIP2"
+assert_not_contains "cursor: night two does not fall back" "falling back" \
+    "$(cat "$LOGS/nase.log")"
+
 test_summary
