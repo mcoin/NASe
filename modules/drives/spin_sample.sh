@@ -87,24 +87,63 @@ guess_wake_reason() {
     # several qualify, say so rather than implying certainty.
     local sn best_job="" best_ts="" matches=0 ts
     sn=$(config_len '.sync_jobs')
-    for i in $(seq 0 $((sn - 1))); do
-        job=$(config_idx '.sync_jobs' "$i" '.name')
-        src=$(config_idx '.sync_jobs' "$i" '.source')
-        dst=$(config_idx '.sync_jobs' "$i" '.dest')
-        [[ "$src" == "$mountpoint"* || "$dst" == "$mountpoint"* ]] || continue
-        unit_ran_recently "nase-sync-${job}.service" "$window" || continue
-        matches=$(( matches + 1 ))
-        ts=$(unit_start_epoch "nase-sync-${job}.service") || ts=""
-        # An unknown start time never displaces a known-earlier one.
-        if [[ -z "$best_job" ]] \
-           || { [[ -n "$ts" ]] && { [[ -z "$best_ts" ]] || (( ts < best_ts )); }; }; then
-            best_job="$job"
-            best_ts="$ts"
+
+    # Preferred source: the run ledger written by modules/sync/run-group.sh.
+    # Jobs run one at a time now, so the ledger says outright which job was
+    # running when the drive woke — no inference, no "first of N". systemd
+    # cannot answer this any more: with the per-job timers gone, a finished
+    # oneshot is unloaded and reports empty timestamps.
+    local run_log="${STAMP_DIR:-/var/lib/nase}/sync-runs.log"
+    if [[ -r "$run_log" ]]; then
+        # Last job to have started at or before the wake, within the window.
+        best_job=$(awk -F'\t' -v lo=$(( now - window )) -v hi="$now" \
+                       '$3=="start" && $1>=lo && $1<=hi {j=$2; t=$1} END{if (j!="") print j}' \
+                   "$run_log" 2>/dev/null || true)
+        if [[ -n "$best_job" ]]; then
+            # Only claim it if that job actually touches this drive.
+            local jsrc jdst owns=false
+            for i in $(seq 0 $((sn - 1))); do
+                [[ "$(config_idx '.sync_jobs' "$i" '.name')" == "$best_job" ]] || continue
+                jsrc=$(config_idx '.sync_jobs' "$i" '.source')
+                jdst=$(config_idx '.sync_jobs' "$i" '.dest')
+                [[ "$jsrc" == "$mountpoint"* || "$jdst" == "$mountpoint"* ]] && owns=true
+                break
+            done
+            if [[ "$owns" == "true" ]]; then
+                reason="sync job: ${best_job}"
+            else
+                # The group was running, but the job that was running when this
+                # drive woke does not touch it — most likely the group runner's
+                # change detection reading the source before any job proceeded.
+                reason="sync group running (no job touching ${mountpoint} — likely change detection)"
+            fi
+            best_job="claimed"
+        else
+            best_job=""
         fi
-    done
-    if [[ -n "$best_job" ]]; then
-        reason="sync job: ${best_job}"
-        (( matches > 1 )) && reason="${reason} (first of ${matches} in window)"
+    fi
+
+    # Fallback: infer from systemd, for installs still on per-job timers.
+    if [[ -z "$reason" && -z "$best_job" ]]; then
+        for i in $(seq 0 $((sn - 1))); do
+            job=$(config_idx '.sync_jobs' "$i" '.name')
+            src=$(config_idx '.sync_jobs' "$i" '.source')
+            dst=$(config_idx '.sync_jobs' "$i" '.dest')
+            [[ "$src" == "$mountpoint"* || "$dst" == "$mountpoint"* ]] || continue
+            unit_ran_recently "nase-sync-${job}.service" "$window" || continue
+            matches=$(( matches + 1 ))
+            ts=$(unit_start_epoch "nase-sync-${job}.service") || ts=""
+            # An unknown start time never displaces a known-earlier one.
+            if [[ -z "$best_job" ]] \
+               || { [[ -n "$ts" ]] && { [[ -z "$best_ts" ]] || (( ts < best_ts )); }; }; then
+                best_job="$job"
+                best_ts="$ts"
+            fi
+        done
+        if [[ -n "$best_job" ]]; then
+            reason="sync job: ${best_job}"
+            (( matches > 1 )) && reason="${reason} (first of ${matches} in window)"
+        fi
     fi
 
     if [[ -z "$reason" ]] && unit_ran_recently nase-monitor.service "$window"; then

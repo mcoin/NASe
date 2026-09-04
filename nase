@@ -141,7 +141,10 @@ cmd_status() {
     for i in $(seq 0 $((n - 1))); do
         local job_name timer_unit state next_val next_str stamp_file last_str
         job_name=$(config_idx '.sync_jobs' "$i" '.name')
-        timer_unit="nase-sync-${job_name}.timer"
+        # Jobs no longer have their own timer — they are driven in sequence by
+        # the group timer for their schedule (backlog #4 phase 2 option C), so
+        # "next trigger" is a property of that group.
+        timer_unit="nase-sync-group-$(schedule_slug "$(config_idx '.sync_jobs' "$i" '.schedule')").timer"
 
         state=$(_unit_state "$timer_unit")
         next_val=$(systemctl show "$timer_unit" \
@@ -173,13 +176,24 @@ cmd_status() {
 
 # ── pause / resume ────────────────────────────────────────────────────────────
 
-cmd_pause() {
-    local n count=0
+# Sync jobs are driven by one group timer per distinct schedule, so pause and
+# resume act on those rather than on a timer per job. Collect them by slug so a
+# schedule shared by nine jobs is stopped once, not nine times.
+_sync_group_timers() {
+    local n i seen=" " slug
     n=$(config_len '.sync_jobs')
     for i in $(seq 0 $((n - 1))); do
-        local job timer
-        job=$(config_idx '.sync_jobs' "$i" '.name')
-        timer="nase-sync-${job}.timer"
+        slug=$(schedule_slug "$(config_idx '.sync_jobs' "$i" '.schedule')")
+        [[ "$seen" == *" ${slug} "* ]] && continue
+        seen+="${slug} "
+        echo "nase-sync-group-${slug}.timer"
+    done
+}
+
+cmd_pause() {
+    local count=0 timer
+    while read -r timer; do
+        [[ -n "$timer" ]] || continue
         if systemctl is-active --quiet "$timer" 2>/dev/null; then
             systemctl stop "$timer"
             log_ok "Stopped ${timer}"
@@ -187,7 +201,7 @@ cmd_pause() {
         else
             log_info "${timer} is already stopped"
         fi
-    done
+    done < <(_sync_group_timers)
     if [[ $count -gt 0 ]]; then
         log_ok "Sync timers paused. Run 'sudo nase resume' to restart."
     else
@@ -196,19 +210,16 @@ cmd_pause() {
 }
 
 cmd_resume() {
-    local n
-    n=$(config_len '.sync_jobs')
-    for i in $(seq 0 $((n - 1))); do
-        local job timer
-        job=$(config_idx '.sync_jobs' "$i" '.name')
-        timer="nase-sync-${job}.timer"
+    local timer
+    while read -r timer; do
+        [[ -n "$timer" ]] || continue
         if systemctl is-enabled --quiet "$timer" 2>/dev/null; then
             systemctl start "$timer"
             log_ok "Started ${timer}"
         else
             log_warn "${timer} is not enabled — run 'sudo apply.sh' first"
         fi
-    done
+    done < <(_sync_group_timers)
     log_ok "Sync timers resumed."
 }
 

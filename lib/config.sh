@@ -42,3 +42,22 @@ config_bool() {
 config_idx() {
     config_get "${1}[${2}]${3}"
 }
+
+# schedule_slug <systemd-calendar-expression>
+# Derive a stable, readable unit-name fragment from a schedule string.
+# E.g. '*-*-* 03:00:00' -> '03-00-00', 'Mon *-*-* 04:00' -> 'mon-04-00'.
+#
+# Sync jobs sharing a schedule are driven by one group timer (backlog #4,
+# phase 2 option C), and the group's unit is named after the schedule. Both
+# modules/sync/setup.sh (which writes the unit) and modules/sync/run-group.sh
+# (which the unit invokes, and which re-reads config to find its jobs) derive
+# the slug from the same schedule string, so this must live in one place —
+# if the two ever disagreed the timer would fire a runner that finds no jobs.
+schedule_slug() {
+    local s="${1,,}"
+    # Collapse every run of non-alphanumerics to a single dash, then trim.
+    s=$(printf '%s' "$s" | tr -cs '[:alnum:]' '-')
+    s="${s#-}"
+    s="${s%-}"
+    printf '%s' "$s"
+}

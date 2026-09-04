@@ -150,6 +150,14 @@ def load_config() -> dict:
 def _run(*cmd: str) -> subprocess.CompletedProcess:
     return subprocess.run(list(cmd), capture_output=True, text=True)
 
+def schedule_slug(schedule: str) -> str:
+    """Unit-name fragment for a schedule's sync group.
+
+    Must stay identical to schedule_slug() in lib/config.sh, which is what
+    actually names the units on disk — this side only reads them back.
+    """
+    return re.sub(r"[^a-z0-9]+", "-", schedule.lower()).strip("-")
+
 def unit_active(unit: str) -> str:
     return _run("systemctl", "is-active", unit).stdout.strip() or "unknown"
 
@@ -424,7 +432,10 @@ def build_status(cfg: dict) -> dict:
 
     for job in cfg.get("sync_jobs", []):
         name      = job["name"]
-        unit      = f"nase-sync-{name}.timer"
+        # Jobs no longer carry their own timer: one group timer per distinct
+        # schedule runs them in sequence (backlog #4 phase 2 option C), so the
+        # next-trigger shown against a job is its group's.
+        unit      = f"nase-sync-group-{schedule_slug(job.get('schedule', ''))}.timer"
         state     = unit_active(unit)
         last, ago = stamp_info(name)
         next_dt, next_in = unit_next(unit) if state == "active" else ("—", None)
