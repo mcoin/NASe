@@ -11,9 +11,25 @@ live system match the config idempotently.
 ## Hardware
 
 - Raspberry Pi running Debian/Ubuntu (aarch64)
-- `/dev/sda` → primary drive (1.8 TB, ext4, `/mnt/primary`, `role: main`)
-- `/dev/sdb` → backup_daily (ext4, `/mnt/backup_daily`, `role: backup`, normally read-only)
 - SD card → OS root (`/`)
+
+Managed drives, identified the only two ways that stay true — role and UUID:
+
+| role | name | UUID | size / model | USB bridge | driver |
+|------|------|------|--------------|------------|--------|
+| `main` | primary → `/mnt/primary` | `524be343-…b0f1fab13534` | 5.5 TB WDC WD60EZAX | JMicron JMS578 `152d:0578` | `uas` |
+| `backup` | backup_daily → `/mnt/backup_daily` | `532b7925-…56050eb510d2` | 1.8 TB ST2000DM001 | ASMedia AS2105 `174c:5106` | `usb-storage` |
+
+Both ext4; backup_daily is read-only at rest. Two Intenso Ultra Line USB drives
+(`1f75:0917`, `1f75:0903`, 117 GB, hfsplus) are also attached but appear nowhere
+in `config.yaml` — NASe does not manage or touch them.
+
+**Device letters are not stable across reboots.** On 2026-09-05 primary moved
+from `/dev/sda` to `/dev/sdb` simply because the AS2105 enumerated first that
+boot. Never hard-code a letter and never compare a before/after measurement by
+letter: doing exactly that during backlog #27 made a `hdparm -C /dev/sda` reading
+of *backup_daily* look like a successful fix to *primary*. Resolve drives by
+UUID (as `config.yaml` and every module do), or by USB `vid:pid`.
 
 `config.yaml` is authoritative for drive names and mountpoints; the above is
 what it currently declares. Note that `/mnt/backup1` and `/mnt/backup2` are
@@ -23,10 +39,16 @@ device — which is exactly the trap `lib/guards.sh` (`is_safe_mount_path`)
 exists to catch. Any new code that walks or writes under a drive's mountpoint
 must go through that guard.
 
-`hdparm -C /dev/sda` always answers `unknown`: the USB-SATA bridge does not
-implement ATA CHECK POWER MODE. Never treat that as "awake" — ask
-`modules/drives/spin_status.sh <name>`, which falls back to inferring state
-from `/sys/block/<disk>/stat` and reports `estimated`.
+`hdparm -C` always answers `unknown` for **primary**: its JMS578 bridge does not
+implement ATA CHECK POWER MODE, even though SMART passes through it fine. This
+is the bridge itself, not the `uas` driver — backlog #27 forced the device onto
+`usb-storage` with `usb-storage.quirks=152d:0578:u` and the answer did not
+change, so the quirk was rolled back. backup_daily's AS2105 does report power
+state, which is why one drive says `confirmed` and the other `estimated`. Never
+treat `unknown` as "awake" — ask `modules/drives/spin_status.sh <name>`, which
+falls back to inferring state from `/sys/block/<disk>/stat` and reports
+`estimated`. Any replacement enclosure must be checked for a working
+`hdparm -C` before its return window closes.
 
 ## Repository layout
 
