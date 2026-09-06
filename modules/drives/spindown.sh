@@ -1,46 +1,23 @@
 #!/usr/bin/env bash
 # modules/drives/spindown.sh
-# Writes udev rules that configure hdparm APM spindown timers when a drive
-# with a known UUID is attached.  Also applies hdparm immediately to any
-# drive that is currently present.
+# Writes udev rules that ask nase-spindown.service to configure hdparm APM
+# spindown timers when a drive with a known UUID is attached.  Also applies
+# hdparm immediately to any drive that is currently present.
 # Idempotent — safe to re-run.
 set -euo pipefail
 
 REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 source "${REPO_ROOT}/lib/log.sh"
 source "${REPO_ROOT}/lib/config.sh"
+source "${REPO_ROOT}/modules/drives/spindown_common.sh"
 
 UDEV_RULES_FILE="/etc/udev/rules.d/99-nase-spindown.rules"
-
-# hdparm -S value encoding:
-#   0        = disable spindown
-#   1-240    = value × 5 seconds   (so 240 = 20 minutes)
-#   241-251  = 30 min + (value-241) × 30 min
-# We receive spindown_min from config and convert to the closest value.
-spindown_min_to_hdparm() {
-    local minutes="$1"
-    if [[ "$minutes" -eq 0 ]]; then
-        echo 0
-        return
-    fi
-    local seconds=$(( minutes * 60 ))
-    if [[ "$seconds" -le 1200 ]]; then
-        # Range 1-240: each unit = 5 s
-        local val=$(( seconds / 5 ))
-        [[ "$val" -lt 1 ]] && val=1
-        echo "$val"
-    else
-        # Range 241-251: 241 = 30 min, each +1 adds 30 min (up to ~5.5 h)
-        local val=$(( 241 + (minutes - 30) / 30 ))
-        [[ "$val" -gt 251 ]] && val=251
-        echo "$val"
-    fi
-}
 
 n=$(config_len '.drives')
 {
     echo "# Managed by NASe — do not edit manually. Re-run apply.sh instead."
-    echo "# Sets hdparm APM spindown timer when a NASe-managed drive is attached."
+    echo "# Starts nase-spindown.service when a NASe-managed drive is attached, which"
+    echo "# applies the hdparm APM/standby settings (with retries — see backlog #32)."
     echo ""
 } > "$UDEV_RULES_FILE"
 
@@ -69,31 +46,25 @@ for i in $(seq 0 $((n - 1))); do
         echo "# Drive '${name}' (spindown disabled)" >> "$UDEV_RULES_FILE"
     else
         log_info "Drive '${name}': spindown after ${spindown_min} min (hdparm -S ${hdparm_val})"
-        # The rule matches the disk device (not partition) by UUID of any partition on it.
-        # DEVTYPE==disk matches the whole disk; we use the UUID of the first partition.
-        # Also force APM (-B) to a spin-down-permitting level: hdparm docs say
-        # 128-254 (many drives' factory default, e.g. 254) *does not permit
-        # spin-down* at the drive firmware level, silently overriding -S no
-        # matter what timer value it's set to. 127 is the least aggressive
-        # value that still permits spin-down, so it doesn't fight normal I/O.
+        # The rule starts nase-spindown.service rather than running hdparm
+        # itself. udev fires 1-2 s after the device appears, while a USB disk
+        # is still spinning up and its bridge rejects SET FEATURES — an
+        # inline hdparm here failed on every boot and left both drives with
+        # spin-down disabled (backlog #32). The service re-reads config.yaml,
+        # resolves each drive by UUID and retries, and --no-block keeps the
+        # udev worker free while it does. Boot is covered separately by the
+        # unit's own WantedBy=multi-user.target, so this only has to handle
+        # hot-plug.
         cat >> "$UDEV_RULES_FILE" <<EOF
 # Drive: ${name} — spindown after ${spindown_min} min
 ACTION=="add|change", SUBSYSTEM=="block", ENV{ID_FS_UUID}=="${uuid}", \\
-  RUN+="/usr/bin/hdparm -B 127 -S ${hdparm_val} /dev/%k"
+  RUN+="/usr/bin/systemctl start --no-block nase-spindown.service"
 EOF
     fi
 
-    # Apply hdparm immediately if the device is currently present
-    dev_symlink="/dev/disk/by-uuid/${uuid}"
-    if [[ -e "$dev_symlink" ]]; then
-        dev=$(readlink -f "$dev_symlink")
-        # hdparm -S/-B apply to the whole disk, not a partition
-        disk=$(lsblk -no pkname "$dev" 2>/dev/null || true)
-        if [[ -n "$disk" ]]; then
-            log_info "  Applying hdparm -B 127 -S ${hdparm_val} to /dev/${disk}"
-            hdparm -B 127 -S "$hdparm_val" "/dev/${disk}" &>/dev/null || log_warn "  hdparm failed for /dev/${disk}"
-        fi
-    fi
+    # Apply immediately too, so a config change takes effect without waiting
+    # for a reboot or a re-plug. Same code path the boot service uses.
+    spindown_apply_drive "$name" "$uuid" "$hdparm_val" || true
 done
 
 udevadm control --reload-rules

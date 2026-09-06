@@ -1,0 +1,21 @@
+# Managed by NASe — installed from systemd/ by apply.sh. Do not edit manually.
+[Unit]
+Description=NASe drive spindown settings (hdparm APM/standby)
+Documentation=file:__REPO_ROOT__/modules/drives/spindown_apply.sh
+# APM and the standby timer are reset by every power cycle, so they have to be
+# re-applied at boot. Ordered after the filesystems so the drives have been
+# enumerated; the script retries anyway, because a USB disk can still be
+# spinning up long after its device node appears (backlog #32).
+After=local-fs.target
+Wants=local-fs.target
+
+[Service]
+Type=oneshot
+Environment=REPO_ROOT=__REPO_ROOT__
+ExecStart=__REPO_ROOT__/modules/drives/spindown_apply.sh
+# Long enough for the retry budget on every configured drive; the unit is
+# oneshot and nothing waits on it, so a slow enclosure delays nothing else.
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target

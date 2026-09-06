@@ -84,6 +84,10 @@ done
 
 systemctl daemon-reload
 systemctl enable --now nase-monitor.service nase-monitor.timer
+# Enabled but not started: the drives module has already applied spindown in
+# this same run. This unit exists to re-apply it at boot, where nothing else
+# does (backlog #32).
+systemctl enable nase-spindown.service
 
 # ── Logrotate ─────────────────────────────────────────────────────────────────
 log_section "Logrotate"

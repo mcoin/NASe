@@ -39,6 +39,18 @@ device — which is exactly the trap `lib/guards.sh` (`is_safe_mount_path`)
 exists to catch. Any new code that walks or writes under a drive's mountpoint
 must go through that guard.
 
+**hdparm APM/standby settings do not survive a power cycle.** A reboot resets
+APM to the drive's factory default (usually 254), which disables spin-down in
+firmware and silently overrides any `-S` timer, so an idle drive spins
+forever. Re-applying them is `nase-spindown.service`'s job, not udev's: udev
+fires 1–2 s after the device node appears, while a USB disk is still spinning
+up and its bridge rejects `SET FEATURES`, so the old inline `RUN+="hdparm …"`
+failed on every boot (#32). `-B` and `-S` are applied as separate invocations
+— primary's bridge has no APM at all, and a combined call fails as a whole,
+taking the standby timer down with it. If a drive is spinning with no I/O,
+check `hdparm -B <disk>` before looking for a process: 254 means nothing ever
+applied the settings.
+
 `hdparm -C` always answers `unknown` for **primary**: its JMS578 bridge does not
 implement ATA CHECK POWER MODE, even though SMART passes through it fine. This
 is the bridge itself, not the `uas` driver — backlog #27 forced the device onto
@@ -69,7 +81,11 @@ modules/
   drives/
     setup.sh               Writes systemd .mount units; cleans up stale units by UUID;
                            unmounts stale device paths (deepest-first, lazy fallback)
-    spindown.sh            Writes udev rules for hdparm spindown
+    spindown.sh            Writes udev rules that trigger nase-spindown.service
+    spindown_common.sh     Shared spindown helpers: minutes -> hdparm -S, UUID -> disk,
+                           retrying applier (-B and -S applied separately)
+    spindown_apply.sh      Applies every drive's APM/standby settings; run by
+                           nase-spindown.service at boot and on hot-plug
     monitor.sh             SMART health checks, triggered by nase-monitor.timer
   samba/
     setup.sh               Generates /etc/samba/smb.conf from config; manages Samba users
@@ -106,6 +122,8 @@ modules/
 systemd/
   nase-monitor.service     Runs modules/drives/monitor.sh
   nase-monitor.timer       Periodic SMART / health check trigger
+  nase-spindown.service    Re-applies hdparm APM/standby at boot (settings do not
+                           survive a power cycle)
 
 tests/
   validate-config.sh       Checks config.yaml structure (trailing slashes, required fields)
@@ -132,7 +150,7 @@ config/
 11. `run_module filebrowser` (if enabled)
 12. Install/update systemd units from `systemd/`
 13. Migrate old `nas-*` unit names to `nase-*`
-14. `systemctl daemon-reload && enable nase-monitor`
+14. `systemctl daemon-reload && enable nase-monitor`, enable `nase-spindown`
 15. Install logrotate config
 
 ## nase CLI commands
@@ -183,6 +201,7 @@ sudo nase integrity bootstrap <name> [limit]
 | `/etc/systemd/system/mnt-*.mount` | Drive mount units (NASe-managed) |
 | `/etc/systemd/system/srv-filebrowser-*.mount` | Filebrowser bind-mount units |
 | `/etc/systemd/system/nase-sync-*.{service,timer}` | Per-job sync units |
+| `/etc/udev/rules.d/99-nase-spindown.rules` | Starts `nase-spindown.service` on drive attach |
 
 ## Secrets (`.env`)
 
