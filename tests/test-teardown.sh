@@ -143,4 +143,24 @@ export MOUNTS=""
 export BUSY_PATHS=""
 assert_exit0 "an empty mount table is not an error" run_teardown
 
+# ── The unit that runs it ────────────────────────────────────────────────────
+# The script is only ever reached through nase-shutdown.service's ExecStop, and
+# twice now that path was broken while the script itself was fine: first the
+# unit was enabled but never started (66c40d1), then it was active but had no
+# stop job in the shutdown transaction, because DefaultDependencies=no drops
+# the implicit Conflicts=shutdown.target. Both failures are invisible until a
+# real reboot, so they are asserted here against the unit file.
+unit=$(cat "${REPO_ROOT}/systemd/nase-shutdown.service")
+
+assert_contains "the unit conflicts with shutdown.target, so a stop job exists" \
+    "Conflicts=shutdown.target" "$unit"
+assert_contains "the teardown is ordered before the filesystems come down" \
+    "Before=umount.target shutdown.target" "$unit"
+assert_contains "the script runs as ExecStop, not ExecStart" \
+    "ExecStop=__REPO_ROOT__/modules/drives/teardown.sh" "$unit"
+assert_contains "the unit stays active so there is something to stop" \
+    "RemainAfterExit=yes" "$unit"
+assert_contains "and apply.sh starts it, not just enables it" \
+    "systemctl enable --now nase-shutdown.service" "$(cat "${REPO_ROOT}/apply.sh")"
+
 test_summary

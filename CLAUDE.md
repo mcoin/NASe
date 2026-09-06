@@ -265,6 +265,16 @@ NOTIFY_WEBHOOK_URL
   carried `After=mnt-<drive>.mount` since they were introduced, which already
   gives systemd the stop ordering; the teardown adds the flush, the bounded
   steps and the lazy fallback on top of it.
+  **An ExecStop hook only runs if something stops the unit.** Two reboots
+  passed with `teardown.sh` never executing, for two different reasons: the
+  unit was enabled but not started (fixed by `enable --now` in apply.sh), and
+  then it was active but had no stop job — `DefaultDependencies=no` suppresses
+  the implicit `Conflicts=shutdown.target`, and that conflict is the only
+  thing that puts a stop job into the shutdown transaction. `Before=` merely
+  orders a stop job that already exists. Both failures are silent: the
+  shutdown looks clean, and the only evidence is the absence of
+  `Stopping nase-shutdown.service` in the journal and of teardown lines in
+  `nase.log`. `tests/test-teardown.sh` now asserts both against the unit file.
 - **`orphan cleanup on readonly fs` is not evidence of a dirty shutdown.**
   #31 originally read that line as proof the filesystems were never unmounted
   cleanly. It is not: `mmcblk0p2` and backup_daily carry the ext4 `orphan_file`

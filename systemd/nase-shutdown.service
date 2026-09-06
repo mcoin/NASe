@@ -3,8 +3,18 @@
 Description=NASe ordered drive teardown at shutdown
 Documentation=file:__REPO_ROOT__/modules/drives/teardown.sh
 DefaultDependencies=no
-# Started after the filesystems are up, which means it is *stopped* before
-# they go down — that reversal is what places the teardown ahead of systemd's
+# Conflicts= is what makes the teardown run at all, and it has to be spelled
+# out here: DefaultDependencies=no suppresses the implicit
+# Conflicts=shutdown.target every ordinary service gets, and that conflict is
+# the only thing that puts a *stop* job for this unit into the shutdown
+# transaction. Without it the unit simply stays active until systemd-shutdown
+# kills everything, and ExecStop is never reached — which is exactly what the
+# 15:44 reboot on 2026-09-06 recorded: the unit was active, the shutdown was
+# clean, and not one line of teardown.sh ran. Before= only orders a stop job
+# that already exists; it cannot create one.
+Conflicts=shutdown.target
+# Started after the filesystems are up, which means it is stopped before they
+# go down — that reversal is what places the teardown ahead of systemd's
 # generic unmounting.
 After=local-fs.target
 Before=umount.target shutdown.target
