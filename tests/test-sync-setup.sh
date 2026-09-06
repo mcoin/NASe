@@ -16,7 +16,8 @@ SYSTEMD_OUT="${WORK}/systemd"
 TEST_CFG="${WORK}/config.yaml"
 trap 'rm -rf "$WORK"' EXIT
 
-mkdir -p "$STUBS" "$SYSTEMD_OUT"
+STAMP_OUT="${WORK}/stamps"
+mkdir -p "$STUBS" "$SYSTEMD_OUT" "$STAMP_OUT"
 
 printf '#!/usr/bin/env bash\nexit 0\n' > "${STUBS}/systemctl"
 chmod +x "${STUBS}/systemctl"
@@ -27,6 +28,7 @@ export PATH="${STUBS}:${PATH}"
 run_setup() {
     CONFIG_FILE="$TEST_CFG" \
     SYSTEMD_DIR="$SYSTEMD_OUT" \
+    NASE_STAMP_DIR="$STAMP_OUT" \
     bash "${REPO_ROOT}/modules/sync/setup.sh" 2>/dev/null
 }
 
@@ -112,6 +114,33 @@ assert_contains "group service Type=oneshot" \
     "Type=oneshot"               "$grp_content"
 assert_contains "group service After= includes primary mount" \
     "mnt-primary.mount"          "$grp_content"
+
+# ── Tests: per-job state for jobs that left config.yaml ───────────────────────
+# Removing a job used to prune its units but leave its stamp behind for good;
+# stale stamps from a July 2026 rename were still on disk in September.
+: > "${STAMP_OUT}/sync-photos.stamp"          # the configured job
+: > "${STAMP_OUT}/detect-photos.cursor"
+: > "${STAMP_OUT}/sync-videos.stamp"          # renamed away
+: > "${STAMP_OUT}/detect-videos.cursor"
+: > "${STAMP_OUT}/sync-omv2.stamp"            # dropped outright
+: > "${STAMP_OUT}/sync-runs.log"              # not per-job state
+: > "${STAMP_OUT}/web-app.hash"               # belongs to another module
+run_setup
+
+assert_file_exists "the configured job keeps its stamp" \
+    "${STAMP_OUT}/sync-photos.stamp"
+assert_file_exists "and its detection cursor" \
+    "${STAMP_OUT}/detect-photos.cursor"
+assert_file_absent "a job no longer in config.yaml loses its stamp" \
+    "${STAMP_OUT}/sync-videos.stamp"
+assert_file_absent "and its detection cursor" \
+    "${STAMP_OUT}/detect-videos.cursor"
+assert_file_absent "a job dropped outright loses its stamp" \
+    "${STAMP_OUT}/sync-omv2.stamp"
+assert_file_exists "the shared run log is not per-job state and survives" \
+    "${STAMP_OUT}/sync-runs.log"
+assert_file_exists "another module's state is never touched" \
+    "${STAMP_OUT}/web-app.hash"
 
 # ── Tests: multiple jobs ───────────────────────────────────────────────────────
 cat > "$TEST_CFG" <<'YAML'

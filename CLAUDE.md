@@ -96,6 +96,7 @@ modules/
   sync/
     setup.sh               Writes systemd .service + .timer pairs per sync job;
                            also creates .trash directories (remounting rw if needed)
+                           and prunes stamps/cursors of jobs dropped from config
     sync.sh                Runs one rsync job: change detection, rw remount, trash, stamps
     notify.sh              Sends email or webhook notification on failure
   filebrowser/

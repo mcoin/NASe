@@ -21,6 +21,9 @@ source "${REPO_ROOT}/lib/log.sh"
 source "${REPO_ROOT}/lib/config.sh"
 
 SYSTEMD_DIR="${SYSTEMD_DIR:-/etc/systemd/system}"
+# Per-job state written by sync.sh; overridable so tests can point it at a
+# scratch directory instead of the live one.
+STAMP_DIR="${NASE_STAMP_DIR:-/var/lib/nase}"
 SYNC_SCRIPT="${REPO_ROOT}/modules/sync/sync.sh"
 GROUP_SCRIPT="${REPO_ROOT}/modules/sync/run-group.sh"
 UNIT_PREFIX="nase-sync-"
@@ -205,6 +208,44 @@ for existing_unit in "${SYSTEMD_DIR}/${UNIT_PREFIX}"*.service; do
         rm -f "${SYSTEMD_DIR}/${unit_base}.service" "${SYSTEMD_DIR}/${unit_base}.timer"
     fi
 done
+
+# ── Drop per-job state for jobs that left config.yaml ───────────────────────
+# The loop above prunes a removed job's units, but its state on the SD card
+# was left behind: six sync-*.stamp files belonging to jobs renamed or dropped
+# in July 2026 were still in /var/lib/nase two months later (found while
+# investigating backlog #31). They are inert — nothing reads the stamp of a
+# job that no longer exists — but they make the stamp directory a misleading
+# picture of what actually runs, which is exactly how a stale mount unit went
+# unnoticed for months.
+prune_job_state() {
+    local pattern="$1" prefix="$2" suffix="$3"
+    local file base job keep cname
+    for file in "${STAMP_DIR}"/${pattern}; do
+        [[ -f "$file" ]] || continue
+        base=$(basename "$file")
+        job="${base#"$prefix"}"
+        job="${job%"$suffix"}"
+
+        keep=false
+        for cname in "${configured_names[@]}"; do
+            if [[ "$job" == "$cname" ]]; then
+                keep=true
+                break
+            fi
+        done
+        if [[ "$keep" == "true" ]]; then
+            continue
+        fi
+
+        log_warn "Removing obsolete ${suffix#.} for '${job}': ${base}"
+        rm -f "$file"
+    done
+}
+
+if [[ -d "$STAMP_DIR" ]]; then
+    prune_job_state 'sync-*.stamp'    'sync-'   '.stamp'
+    prune_job_state 'detect-*.cursor' 'detect-' '.cursor'
+fi
 
 _systemctl daemon-reload
 log_ok "Sync jobs configured."
