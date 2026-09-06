@@ -1,0 +1,27 @@
+# Managed by NASe — installed from systemd/ by apply.sh. Do not edit manually.
+[Unit]
+Description=NASe ordered drive teardown at shutdown
+Documentation=file:__REPO_ROOT__/modules/drives/teardown.sh
+DefaultDependencies=no
+# Started after the filesystems are up, which means it is *stopped* before
+# they go down — that reversal is what places the teardown ahead of systemd's
+# generic unmounting.
+After=local-fs.target
+Before=umount.target shutdown.target
+# Ordered after the units that hold the drives open, so by the time the
+# teardown runs at shutdown they have already been stopped. Units that are
+# not installed here are simply ignored.
+After=smbd.service nmbd.service filebrowser.service nase-primary-watch.service nase-web.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+Environment=REPO_ROOT=__REPO_ROOT__
+ExecStart=/bin/true
+ExecStop=__REPO_ROOT__/modules/drives/teardown.sh
+# The script bounds every step it takes; this is the backstop for the script
+# itself, so the teardown can never become the hang it was written to prevent.
+TimeoutStopSec=90
+
+[Install]
+WantedBy=multi-user.target

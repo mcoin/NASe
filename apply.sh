@@ -88,6 +88,31 @@ systemctl enable --now nase-monitor.service nase-monitor.timer
 # this same run. This unit exists to re-apply it at boot, where nothing else
 # does (backlog #32).
 systemctl enable nase-spindown.service
+# Ordered teardown of the drives at shutdown (backlog #31). Enabled, not
+# started: its ExecStart is a no-op and only its ExecStop does the work.
+systemctl enable nase-shutdown.service
+
+# ── systemd drop-ins ─────────────────────────────────────────────────────────
+# Both override Raspberry Pi OS / systemd defaults that made the 2026-09-05
+# shutdown hang undiagnosable and unbounded (backlog #31).
+log_section "systemd drop-ins"
+install_dropin() {
+    local src="$1" dest="$2" reload="$3"
+    mkdir -p "$(dirname "$dest")"
+    if [[ ! -f "$dest" ]] || ! diff -q "$src" "$dest" &>/dev/null; then
+        log_info "Installing ${dest}"
+        cp "$src" "$dest"
+        chmod 644 "$dest"
+        eval "$reload"
+    fi
+}
+install_dropin "${REPO_ROOT}/config/journald-nase.conf" \
+    /etc/systemd/journald.conf.d/50-nase.conf \
+    'systemctl restart systemd-journald && journalctl --flush || log_warn "  Could not switch the journal to persistent storage"'
+install_dropin "${REPO_ROOT}/config/system-nase.conf" \
+    /etc/systemd/system.conf.d/50-nase.conf \
+    'systemctl daemon-reexec || log_warn "  Could not re-exec systemd"'
+log_ok "Journal is persistent (200M cap); unit stop timeout is 30s."
 
 # ── Logrotate ─────────────────────────────────────────────────────────────────
 log_section "Logrotate"

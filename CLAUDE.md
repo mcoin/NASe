@@ -86,6 +86,9 @@ modules/
                            retrying applier (-B and -S applied separately)
     spindown_apply.sh      Applies every drive's APM/standby settings; run by
                            nase-spindown.service at boot and on hot-plug
+    teardown.sh            Ordered unmount of bind mounts + drives at shutdown,
+                           run as ExecStop of nase-shutdown.service
+    prune_mount_units.sh   Removes mount units for drives dropped from config.yaml
     monitor.sh             SMART health checks, triggered by nase-monitor.timer
   samba/
     setup.sh               Generates /etc/samba/smb.conf from config; manages Samba users
@@ -124,6 +127,7 @@ systemd/
   nase-monitor.timer       Periodic SMART / health check trigger
   nase-spindown.service    Re-applies hdparm APM/standby at boot (settings do not
                            survive a power cycle)
+  nase-shutdown.service    ExecStop runs modules/drives/teardown.sh before umount.target
 
 tests/
   validate-config.sh       Checks config.yaml structure (trailing slashes, required fields)
@@ -133,6 +137,10 @@ tests/
 
 config/
   logrotate-nase.conf      Logrotate config installed to /etc/logrotate.d/nase
+  journald-nase.conf       Drop-in making the journal persistent (Raspberry Pi OS
+                           ships Storage=volatile) — /etc/systemd/journald.conf.d/50-nase.conf
+  system-nase.conf         Drop-in setting DefaultTimeoutStopSec=30s —
+                           /etc/systemd/system.conf.d/50-nase.conf
 ```
 
 ## apply.sh order of operations
@@ -150,8 +158,9 @@ config/
 11. `run_module filebrowser` (if enabled)
 12. Install/update systemd units from `systemd/`
 13. Migrate old `nas-*` unit names to `nase-*`
-14. `systemctl daemon-reload && enable nase-monitor`, enable `nase-spindown`
-15. Install logrotate config
+14. `systemctl daemon-reload && enable nase-monitor`, enable `nase-spindown`, `nase-shutdown`
+15. Install systemd drop-ins (journald persistence, stop timeout)
+16. Install logrotate config
 
 ## nase CLI commands
 
@@ -202,6 +211,8 @@ sudo nase integrity bootstrap <name> [limit]
 | `/etc/systemd/system/srv-filebrowser-*.mount` | Filebrowser bind-mount units |
 | `/etc/systemd/system/nase-sync-*.{service,timer}` | Per-job sync units |
 | `/etc/udev/rules.d/99-nase-spindown.rules` | Starts `nase-spindown.service` on drive attach |
+| `/etc/systemd/journald.conf.d/50-nase.conf` | Persistent journal, 200M cap |
+| `/etc/systemd/system.conf.d/50-nase.conf` | `DefaultTimeoutStopSec=30s` |
 
 ## Secrets (`.env`)
 
@@ -239,6 +250,26 @@ NOTIFY_WEBHOOK_URL
   pass, piggybacked onto the existing nightly sync window (never triggers its
   own drive spin-up). See `INTEGRITY_DESIGN.md` for the full design and the
   guards protecting `.nase/` from Samba/filebrowser/`fix-ownership.sh`.
+- **Shutdown tears the drives down in a defined order.** A reboot on
+  2026-09-05 never completed and the power had to be pulled, leaving the SD
+  card and backup_daily with orphan inodes (#31). Ten filebrowser bind mounts
+  sit on two USB drive mounts, and nothing ordered their teardown: a bind
+  mount that will not release keeps the drive under it busy, and no systemd
+  timeout covers a kernel-side unmount that never returns.
+  `modules/drives/teardown.sh` (ExecStop of `nase-shutdown.service`) flushes
+  any rw drive, unmounts deepest-first with a lazy fallback, and syncs — every
+  step wrapped in `timeout`, every failure tolerated. It must never call
+  `systemctl`: it runs inside the shutdown transaction, where queueing new
+  jobs can deadlock the shutdown it exists to protect. Ordering (`After=` in
+  the unit) is what stops the services.
+- **The journal is made persistent on purpose.** Raspberry Pi OS ships
+  `Storage=volatile` to spare the SD card, which means a hung shutdown leaves
+  no evidence at all — #31 had to be reconstructed from side effects. NASe
+  installs a capped `Storage=persistent` drop-in instead. Related trap: this
+  Pi has no RTC, so journal and wtmp timestamps in the first seconds of a boot
+  can be minutes behind reality (systemd restores the last saved clock, then
+  timesyncd corrects it). Use `uptime -s` to date a boot, not the journal's
+  first entry.
 - **Backlog text is written unwrapped; the reader folds legacy hard wraps.**
   Ticket descriptions, decisions and notes are stored exactly as typed and are
   never rewritten. Older entries were hard-wrapped at ~80 columns and render in

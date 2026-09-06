@@ -13,6 +13,10 @@ SYSTEMD_DIR="/etc/systemd/system"
 n=$(config_len '.drives')
 log_info "Configuring ${n} drive(s)..."
 
+# Drives deleted from config.yaml leave their mount units behind; prune them
+# before writing the current ones (backlog #31).
+bash "${REPO_ROOT}/modules/drives/prune_mount_units.sh"
+
 for i in $(seq 0 $((n - 1))); do
     name=$(config_idx '.drives' "$i" '.name')
     active=$(config_idx '.drives' "$i" '.active')
