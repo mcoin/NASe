@@ -252,17 +252,32 @@ NOTIFY_WEBHOOK_URL
   own drive spin-up). See `INTEGRITY_DESIGN.md` for the full design and the
   guards protecting `.nase/` from Samba/filebrowser/`fix-ownership.sh`.
 - **Shutdown tears the drives down in a defined order.** A reboot on
-  2026-09-05 never completed and the power had to be pulled, leaving the SD
-  card and backup_daily with orphan inodes (#31). Ten filebrowser bind mounts
-  sit on two USB drive mounts, and nothing ordered their teardown: a bind
-  mount that will not release keeps the drive under it busy, and no systemd
-  timeout covers a kernel-side unmount that never returns.
+  2026-09-05 never completed and the power had to be pulled (#31). Ten
+  filebrowser bind mounts sit on two USB drive mounts, and a bind mount that
+  will not release keeps the drive under it busy, with no systemd timeout
+  covering a kernel-side unmount that never returns.
   `modules/drives/teardown.sh` (ExecStop of `nase-shutdown.service`) flushes
   any rw drive, unmounts deepest-first with a lazy fallback, and syncs — every
   step wrapped in `timeout`, every failure tolerated. It must never call
   `systemctl`: it runs inside the shutdown transaction, where queueing new
   jobs can deadlock the shutdown it exists to protect. Ordering (`After=` in
-  the unit) is what stops the services.
+  the unit) is what stops the services. Note that the bind-mount units have
+  carried `After=mnt-<drive>.mount` since they were introduced, which already
+  gives systemd the stop ordering; the teardown adds the flush, the bounded
+  steps and the lazy fallback on top of it.
+- **`orphan cleanup on readonly fs` is not evidence of a dirty shutdown.**
+  #31 originally read that line as proof the filesystems were never unmounted
+  cleanly. It is not: `mmcblk0p2` and backup_daily carry the ext4 `orphan_file`
+  / `orphan_present` features, which make `ext4_orphan_cleanup()` skip its
+  empty-list early return and log the line on *every* read-only mount. primary
+  mounts rw and never shows it; the SD card is mounted ro then remounted rw on
+  every boot, and backup_daily is ro by design, so both print it every time.
+  Confirmed on 2026-09-06: backup_daily unmounted cleanly at 10:35:59, was
+  remounted ro at 10:39:11, and logged it again — and the reboot at 15:23,
+  watched from start to finish in the journal, produced it on a shutdown that
+  demonstrably completed. `e2fsck -f -p` on backup_daily found nothing. To
+  judge whether a filesystem was dirty, use `dumpe2fs -h` (`Filesystem state`)
+  or the `N orphan inodes deleted` line, which is what actual cleanup logs.
 - **The journal is made persistent on purpose.** Raspberry Pi OS ships
   `Storage=volatile` to spare the SD card, which means a hung shutdown leaves
   no evidence at all — #31 had to be reconstructed from side effects. NASe

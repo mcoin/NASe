@@ -88,9 +88,14 @@ systemctl enable --now nase-monitor.service nase-monitor.timer
 # this same run. This unit exists to re-apply it at boot, where nothing else
 # does (backlog #32).
 systemctl enable nase-spindown.service
-# Ordered teardown of the drives at shutdown (backlog #31). Enabled, not
-# started: its ExecStart is a no-op and only its ExecStop does the work.
-systemctl enable nase-shutdown.service
+# Ordered teardown of the drives at shutdown (backlog #31). Started here as
+# well as enabled: its ExecStart is a no-op, but a unit that is merely enabled
+# is not *active*, and systemd only runs ExecStop for an active unit. Enabling
+# alone left the teardown inert until the next boot — so the first shutdown
+# after installing it, the one most likely to follow an apply, ran unprotected.
+# Starting an already-active unit is a no-op, so re-running apply.sh will not
+# fire the teardown against the live system.
+systemctl enable --now nase-shutdown.service
 
 # ── systemd drop-ins ─────────────────────────────────────────────────────────
 # Both override Raspberry Pi OS / systemd defaults that made the 2026-09-05
