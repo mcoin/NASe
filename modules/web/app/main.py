@@ -647,10 +647,13 @@ _BACKLOG_TYPES    = {"bug", "feature", "improvement"}
 # "closed" = decided against, won't be implemented. Unlike "deleted" it stays
 # visible in the default view: it's a deliberate outcome worth seeing (and
 # worth linking to as a duplicate target), not a mis-click to be hidden away.
-_BACKLOG_STATUSES = {"open", "ready", "done", "closed", "deleted"}
-# "active" is a pseudo-status: it spans open + ready, i.e. everything still
-# waiting to be worked on. It's only ever a filter, never stored on an item.
-_BACKLOG_ACTIVE_STATUSES = {"open", "ready"}
+_BACKLOG_STATUSES = {"open", "ready", "in_progress", "done", "closed", "deleted"}
+# "active" is a pseudo-status: it spans everything still waiting to be worked
+# on or being worked on right now. It's only ever a filter, never stored on an
+# item. "in_progress" has to be in here: "active" is the default view, so a
+# ticket being worked on would otherwise vanish from the one view most likely
+# to be open — and it would vanish silently, which is worse than an error.
+_BACKLOG_ACTIVE_STATUSES = {"open", "ready", "in_progress"}
 _BACKLOG_FILTERS  = {"all", "active"} | _BACKLOG_STATUSES
 # Opening the Backlog tab should show the work that's left, not a wall of
 # finished and abandoned tickets, so "active" — not "all" — is the default.

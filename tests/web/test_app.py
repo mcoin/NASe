@@ -489,11 +489,12 @@ def test_partial_integrity_matches_full_page_content(integrity_client):
 # ── Backlog filters ─────────────────────────────────────────────────────────────
 
 SAMPLE_BACKLOG = [
-    (1, "an open one",    "open",    "bug"),
-    (2, "a ready one",    "ready",   "feature"),
-    (3, "a done one",     "done",    "feature"),
-    (4, "a closed one",   "closed",  "improvement"),
-    (5, "a deleted one",  "deleted", "bug"),
+    (1, "an open one",        "open",        "bug"),
+    (2, "a ready one",        "ready",       "feature"),
+    (3, "an in-progress one", "in_progress", "feature"),
+    (4, "a done one",         "done",        "feature"),
+    (5, "a closed one",       "closed",      "improvement"),
+    (6, "a deleted one",      "deleted",     "bug"),
 ]
 
 
@@ -501,10 +502,22 @@ def _titles(view):
     return [i["title"] for i in view["items"]]
 
 
-def test_backlog_view_active_is_open_plus_ready(backlog_file, client):
+def test_backlog_view_active_spans_open_ready_and_in_progress(backlog_file, client):
     import modules.web.app.main as m
     write_backlog(backlog_file, SAMPLE_BACKLOG)
-    assert _titles(m.backlog_view("active", "all")) == ["an open one", "a ready one"]
+    assert _titles(m.backlog_view("active", "all")) == [
+        "an open one", "a ready one", "an in-progress one"]
+
+
+def test_backlog_view_in_progress_is_visible_in_default_view(backlog_file, client):
+    # The regression this guards is silent rather than loud: leaving
+    # "in_progress" out of _BACKLOG_ACTIVE_STATUSES doesn't raise, it just
+    # hides every ticket someone is actually working on from the default view.
+    import modules.web.app.main as m
+    write_backlog(backlog_file, SAMPLE_BACKLOG)
+    assert m.backlog_view(m._BACKLOG_DEFAULT_FILTER, "all")["status"] == "active"
+    assert "an in-progress one" in _titles(m.backlog_view("active", "all"))
+    assert _titles(m.backlog_view("in_progress", "all")) == ["an in-progress one"]
 
 
 def test_backlog_view_active_combines_with_type_filter(backlog_file, client):
@@ -517,7 +530,8 @@ def test_backlog_view_all_still_excludes_deleted_only(backlog_file, client):
     import modules.web.app.main as m
     write_backlog(backlog_file, SAMPLE_BACKLOG)
     assert _titles(m.backlog_view("all", "all")) == [
-        "an open one", "a ready one", "a done one", "a closed one"]
+        "an open one", "a ready one", "an in-progress one", "a done one",
+        "a closed one"]
 
 
 def test_backlog_view_unknown_status_falls_back_to_default(backlog_file, client):
@@ -525,13 +539,13 @@ def test_backlog_view_unknown_status_falls_back_to_default(backlog_file, client)
     write_backlog(backlog_file, SAMPLE_BACKLOG)
     view = m.backlog_view("bogus", "all")
     assert view["status"] == "active"
-    assert _titles(view) == ["an open one", "a ready one"]
+    assert _titles(view) == ["an open one", "a ready one", "an in-progress one"]
 
 
 def test_backlog_view_total_counts_undeleted_regardless_of_filter(backlog_file, client):
     import modules.web.app.main as m
     write_backlog(backlog_file, SAMPLE_BACKLOG)
-    assert m.backlog_view("closed", "all")["total"] == 4
+    assert m.backlog_view("closed", "all")["total"] == 5
 
 
 def test_backlog_page_defaults_to_active(client, auth_headers, backlog_file):
@@ -747,6 +761,21 @@ def test_saving_untouched_fields_keeps_their_value(client, auth_headers, backlog
     assert item["description"] == "keep me"
     assert item["implementation_details"] == LONG_NOTES
     assert item["status"] == "ready"
+
+
+def test_backlog_update_persists_in_progress(client, auth_headers, backlog_file):
+    """Saving In progress must store it, not silently reset to Open.
+
+    backlog_update falls back to "open" for any status outside
+    _BACKLOG_STATUSES, so a value wired into the dropdown but missing from
+    that set would look like the Save simply didn't take."""
+    write_backlog(backlog_file, [{"id": 1, "title": "a ticket"}])
+    r = client.post("/backlog/1", headers=auth_headers, follow_redirects=False,
+                    data={"title": "a ticket", "type": "feature",
+                          "status": "in_progress", "description": "",
+                          "implementation_details": ""})
+    assert r.status_code == 303
+    assert json.loads(backlog_file.read_text())["items"][0]["status"] == "in_progress"
 
 
 # ── Config editor: comment preservation (#10) ───────────────────────────────────

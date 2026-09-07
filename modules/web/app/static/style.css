@@ -205,6 +205,9 @@ td.mono  { font-family: monospace; font-size: 0.8rem; color: var(--muted); }
 .badge-err   { background: var(--err-bg);  color: var(--err);  }
 .badge-muted { background: var(--border);  color: var(--muted); }
 .badge-info  { background: #dbeafe;         color: #1d4ed8;      }
+/* Work in flight — amber, so it reads as "happening now" and stays clearly
+   apart from badge-info (ready, blue), which sits next to it in the list. */
+.badge-progress { background: #fef3c7;      color: #b45309;      }
 /* Terminal "won't implement" state — a heavier grey than badge-muted (open)
    so it reads as settled rather than merely inactive. */
 .badge-closed { background: #cbd5e1;        color: #334155;      }

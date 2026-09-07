@@ -2,6 +2,7 @@
 {% block title %}#{{ item.id }} {{ item.title }}{% endblock %}
 
 {% block content %}
+{% import "partials/_status_badge.html" as badges %}
 <div class="card">
   <div class="card-head">
     <span class="backlog-detail-head">
@@ -65,6 +66,7 @@
           <select class="form-input form-select" id="field-status" name="status" style="max-width:160px">
             <option value="open"    {% if item.status == "open"    %}selected{% endif %}>Open</option>
             <option value="ready"   {% if item.status == "ready"   %}selected{% endif %}>Ready</option>
+            <option value="in_progress" {% if item.status == "in_progress" %}selected{% endif %}>In progress</option>
             <option value="done"    {% if item.status == "done"    %}selected{% endif %}>Done</option>
             <option value="closed"  {% if item.status == "closed"  %}selected{% endif %}>Closed (won't implement)</option>
             <option value="deleted" {% if item.status == "deleted" %}selected{% endif %}>Deleted</option>
@@ -191,17 +193,7 @@
           {%- endif -%}
         </span>
         <a class="backlog-title" href="/backlog/{{ link.target_id }}">{{ link.target_title }}</a>
-        {% if link.target_status == "ready" %}
-        <span class="badge badge-info">ready</span>
-        {% elif link.target_status == "done" %}
-        <span class="badge badge-ok">done</span>
-        {% elif link.target_status == "closed" %}
-        <span class="badge badge-closed">closed</span>
-        {% elif link.target_status == "deleted" %}
-        <span class="badge badge-err">deleted</span>
-        {% else %}
-        <span class="badge badge-muted">open</span>
-        {% endif %}
+        {{ badges.status_badge(link.target_status) }}
         <form method="post" action="/backlog/{{ item.id }}/links/remove" class="backlog-link-remove-form">
           <input type="hidden" name="rel_type" value="{{ link.type }}">
           <input type="hidden" name="target_id" value="{{ link.target_id }}">

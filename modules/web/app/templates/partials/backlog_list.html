@@ -1,9 +1,10 @@
+{% import "partials/_status_badge.html" as badges %}
 <div class="card" id="backlog-card">
   <div class="card-head">
     <span>Backlog</span>
     <div class="changes-controls">
-      {% for s, lbl, tip in [("active","Active","Open and ready items"), ("all","All","Everything except deleted"),
-                             ("open","Open",""), ("ready","Ready",""), ("done","Done",""),
+      {% for s, lbl, tip in [("active","Active","Open, ready and in-progress items"), ("all","All","Everything except deleted"),
+                             ("open","Open",""), ("ready","Ready",""), ("in_progress","In progress",""), ("done","Done",""),
                              ("closed","Closed",""), ("deleted","Deleted","")] %}
       <button class="win-btn{% if backlog['status'] == s %} win-btn-active{% endif %}"
               {% if tip %}title="{{ tip }}"{% endif %}
@@ -44,17 +45,7 @@
         {%- endif -%}
       </span>
       <a class="backlog-title" href="/backlog/{{ item.id }}">{{ item.title }}</a>
-      {% if item.status == "ready" %}
-      <span class="badge badge-info">ready</span>
-      {% elif item.status == "done" %}
-      <span class="badge badge-ok">done</span>
-      {% elif item.status == "closed" %}
-      <span class="badge badge-closed">closed</span>
-      {% elif item.status == "deleted" %}
-      <span class="badge badge-err">deleted</span>
-      {% else %}
-      <span class="badge badge-muted">open</span>
-      {% endif %}
+      {{ badges.status_badge(item.status) }}
       <span class="backlog-row-actions">
         <button type="button" class="pg-btn" title="Move to top"
                 hx-post="/backlog/{{ item.id }}/move?direction=top&amp;status={{ backlog['status'] }}&amp;type={{ backlog['type'] }}"

@@ -1,0 +1,22 @@
+{# Status badge for a backlog item.
+
+   Shared by the backlog list rows and the detail page's linked-ticket rows.
+   Both rendered their own copy of an identical if/elif chain before this
+   macro existed, so every new status had to be added in two places and
+   missing one showed a ticket with no badge at all on one of the two pages
+   — a silent omission rather than an error. Add new statuses here only. #}
+{% macro status_badge(status) -%}
+{%- if status == "ready" -%}
+<span class="badge badge-info">ready</span>
+{%- elif status == "in_progress" -%}
+<span class="badge badge-progress">in progress</span>
+{%- elif status == "done" -%}
+<span class="badge badge-ok">done</span>
+{%- elif status == "closed" -%}
+<span class="badge badge-closed">closed</span>
+{%- elif status == "deleted" -%}
+<span class="badge badge-err">deleted</span>
+{%- else -%}
+<span class="badge badge-muted">open</span>
+{%- endif -%}
+{%- endmacro %}
