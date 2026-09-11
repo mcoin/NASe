@@ -8,11 +8,24 @@
 # modules/drives/setup.sh) — not by nase-monitor.timer, which only runs once
 # a day and exists for SMART health, not spin-state sampling.
 #
-# Log format: "<epoch>\t<drive>\t<state>\t<confirmed|estimated>\t<reason>"
+# Log format:
+#   "<epoch>\t<drive>\t<state>\t<confirmed|estimated>\t<reason>\t<io_delta>"
 # <reason> is only populated on a standby/unknown -> active transition (a
 # "wake" event) — it's a best-effort guess at what caused it, so the
 # Monitoring tab can help answer "what keeps waking this drive up?" instead
 # of just showing that it happened. Blank ("-") on every other sample.
+#
+# <io_delta> is the number of block-layer requests (reads + writes) completed
+# on the drive since the previous sample, or "-" when it cannot be known.
+# It exists because <reason> alone has proved untrustworthy: on 2026-09-08 a
+# wake was attributed to "sync job: video-backup-daily" on a night when every
+# job took the watcher path and no sync touched a platter at all, and working
+# out that the real cost was a handful of requests rather than a tree scan
+# took an hour of elimination against the journal. The magnitude separates
+# the two instantly — a delta of single digits is a cache miss on a stat, a
+# delta in the tens of thousands is something walking the drive — and it is
+# free to collect, since the counter is a kernel block-layer statistic that
+# never touches the device. See backlog #4.
 # Idempotent — safe to re-run (just appends/prunes).
 set -euo pipefail
 
@@ -32,6 +45,32 @@ RETENTION_DAYS=31
 
 now=$(date +%s)
 cutoff=$(( now - RETENTION_DAYS * 86400 ))
+
+# Where this script remembers the last absolute I/O counter it saw per drive.
+# Deliberately not spin_status.sh's own .state file: that one is rewritten by
+# every caller, including the web dashboard polling every 30s, so a delta
+# taken from it would measure "since some other process last looked" rather
+# than "since the previous sample".
+IO_STATE_DIR="${STAMP_DIR}/spin-sample-io"
+mkdir -p "$IO_STATE_DIR"
+
+# disk_io_count <uuid>
+# Absolute count of completed block-layer requests (reads + writes) for the
+# whole disk backing <uuid>, or "-" if it cannot be read. Resolved the same
+# way spin_status.sh does it — by UUID to the partition, then up to the
+# parent disk, because the counters live on the disk and not the partition.
+# Reads only /sys, so it never wakes or even talks to the drive.
+disk_io_count() {
+    local uuid="$1" dev disk reads writes
+    dev=$(readlink -f "/dev/disk/by-uuid/${uuid}" 2>/dev/null) || { echo "-"; return; }
+    [[ -n "$dev" && -e "$dev" ]] || { echo "-"; return; }
+    disk=$(lsblk -no pkname "$dev" 2>/dev/null | head -n1) || true
+    [[ -n "$disk" ]] || disk=$(basename "$dev")
+    [[ -r "/sys/block/${disk}/stat" ]] || { echo "-"; return; }
+    read -r reads _ _ _ writes _ < "/sys/block/${disk}/stat" || { echo "-"; return; }
+    [[ "$reads" =~ ^[0-9]+$ && "$writes" =~ ^[0-9]+$ ]] || { echo "-"; return; }
+    echo $(( reads + writes ))
+}
 
 # unit_ran_recently <unit> <window_secs>
 # True if <unit> is active right now, OR last finished within the last
@@ -209,6 +248,27 @@ for i in $(seq 0 $((n - 1))); do
     read -r state _since method <<< "$spin_info"
     [[ -n "$state" ]] || continue
 
+    # ── I/O since the previous sample ────────────────────────────────────────
+    # Recorded for every drive, not just the ones on the estimated heuristic:
+    # backup_daily's state comes from hdparm, but knowing how much I/O came
+    # with a wake is just as useful there.
+    uuid=$(config_idx '.drives' "$i" '.uuid')
+    io_now=$(disk_io_count "$uuid")
+    io_state_file="${IO_STATE_DIR}/${name}"
+    io_delta="-"
+    if [[ "$io_now" != "-" ]]; then
+        io_prev=""
+        [[ -f "$io_state_file" ]] && read -r io_prev < "$io_state_file" || true
+        if [[ "$io_prev" =~ ^[0-9]+$ ]] && (( io_now >= io_prev )); then
+            io_delta=$(( io_now - io_prev ))
+        fi
+        # io_now < io_prev means the counters were reset under us — a reboot,
+        # or the drive re-enumerating after a replug. There is no meaningful
+        # delta across that, so report none rather than a bogus huge number,
+        # and re-baseline on this sample.
+        printf '%s\n' "$io_now" > "$io_state_file"
+    fi
+
     reason="-"
     if [[ "$state" == "active" ]]; then
         prev_rec=$(awk -F'\t' -v n="$name" '$2==n {t=$1; s=$3} END{if (t != "") print t"\t"s}' "$HIST_LOG" 2>/dev/null || true)
@@ -230,7 +290,8 @@ for i in $(seq 0 $((n - 1))); do
         fi
     fi
 
-    printf '%s\t%s\t%s\t%s\t%s\n' "$now" "$name" "$state" "$method" "$reason" >> "$HIST_LOG"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "$now" "$name" "$state" "$method" "$reason" "$io_delta" >> "$HIST_LOG"
 done
 
 # Prune anything older than RETENTION_DAYS in one pass — same

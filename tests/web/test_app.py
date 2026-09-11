@@ -1192,3 +1192,60 @@ def test_missing_attachment_file_is_a_404_not_a_crash(attach_client, auth_header
     (tmp_path / "backlog-attachments" / "1" / a["stored_name"]).unlink()
     r = attach_client.get(f"/backlog/1/attachments/{a['id']}", headers=auth_headers)
     assert r.status_code == 404
+
+
+# ── Spin history parsing (#4) ───────────────────────────────────────────────────
+
+def _spin_history(tmp_path, monkeypatch, text):
+    import modules.web.app.main as m
+    log = tmp_path / "spin-history.log"
+    log.write_text(text)
+    monkeypatch.setattr(m, "SPIN_HISTORY_LOG", log)
+    return m._read_spin_history()
+
+
+def test_spin_history_reads_io_delta_into_the_reason(tmp_path, monkeypatch):
+    """The I/O magnitude is the corrective signal for a wake reason that is
+    known to misattribute (backlog #4), so it has to reach the reader."""
+    out = _spin_history(tmp_path, monkeypatch,
+                        "100\tprimary\tactive\testimated\tsync job: video-backup-daily\t3\n")
+    assert out["primary"] == [(100, "active", "sync job: video-backup-daily"
+                                              " — 3 block requests since last sample")]
+
+
+def test_spin_history_io_delta_singular_is_not_pluralised(tmp_path, monkeypatch):
+    out = _spin_history(tmp_path, monkeypatch, "100\tprimary\tactive\testimated\twoke\t1\n")
+    assert out["primary"][0][2] == "woke — 1 block request since last sample"
+
+
+def test_spin_history_unknown_io_delta_leaves_reason_alone(tmp_path, monkeypatch):
+    out = _spin_history(tmp_path, monkeypatch, "100\tprimary\tactive\testimated\twoke\t-\n")
+    assert out["primary"][0][2] == "woke"
+
+
+def test_spin_history_io_delta_without_a_reason_stays_blank(tmp_path, monkeypatch):
+    # Non-wake samples carry "-" as the reason; a delta must not invent one.
+    out = _spin_history(tmp_path, monkeypatch, "100\tprimary\tstandby\testimated\t-\t0\n")
+    assert out["primary"][0][2] == ""
+
+
+def test_spin_history_still_reads_the_older_formats(tmp_path, monkeypatch):
+    """Pre-upgrade lines have to keep rendering — the log is not rewritten on
+    upgrade, so the 30-day window spans both formats after any deploy."""
+    out = _spin_history(tmp_path, monkeypatch,
+                        "100\tprimary\tactive\testimated\twoke\n"       # 5-field
+                        "200\tprimary\tstandby\testimated\n"            # 4-field
+                        "300\tprimary\tactive\testimated\twoke\t7\n")   # 6-field
+    assert out["primary"] == [
+        (100, "active", "woke"),
+        (200, "standby", ""),
+        (300, "active", "woke — 7 block requests since last sample"),
+    ]
+
+
+def test_spin_history_skips_malformed_lines(tmp_path, monkeypatch):
+    out = _spin_history(tmp_path, monkeypatch,
+                        "not-a-timestamp\tprimary\tactive\testimated\t-\t0\n"
+                        "100\tprimary\n"
+                        "300\tprimary\tactive\testimated\t-\t0\n")
+    assert [s[0] for s in out["primary"]] == [300]

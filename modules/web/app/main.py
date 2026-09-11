@@ -240,6 +240,13 @@ def _read_spin_history() -> dict[str, list[tuple[int, str, str]]]:
 
     wake_reason is "" except on a standby/unknown -> active transition sample,
     where spin_sample.sh records its best guess at what caused the wake.
+
+    The guess is only a guess, and a demonstrably fallible one — it names the
+    last sync job to have started before the wake, which on a night when no
+    job touched the drive at all still names a sync job (backlog #4). So when
+    the sample carries an I/O delta, it is folded into the reason text: the
+    number of block requests that actually accompanied the wake is the thing
+    that says whether the named cause is plausible.
     """
     try:
         lines = SPIN_HISTORY_LOG.read_text().splitlines() if SPIN_HISTORY_LOG.exists() else []
@@ -248,9 +255,12 @@ def _read_spin_history() -> dict[str, list[tuple[int, str, str]]]:
     per_drive: dict[str, list[tuple[int, str, str]]] = {}
     for line in lines:
         parts = line.split("\t")
-        # Accept both the current 5-field format and the older 4-field one
-        # (no reason column) so pre-upgrade log entries still render.
-        if len(parts) == 5:
+        # Accept the current 6-field format and the older 5- and 4-field ones
+        # (no I/O delta, no reason column) so pre-upgrade entries still render.
+        io_delta = "-"
+        if len(parts) == 6:
+            ts_str, name, state, _method, reason, io_delta = parts
+        elif len(parts) == 5:
             ts_str, name, state, _method, reason = parts
         elif len(parts) == 4:
             ts_str, name, state, _method = parts
@@ -261,7 +271,11 @@ def _read_spin_history() -> dict[str, list[tuple[int, str, str]]]:
             ts = int(ts_str)
         except ValueError:
             continue
-        per_drive.setdefault(name, []).append((ts, state, "" if reason == "-" else reason))
+        text = "" if reason == "-" else reason
+        if text and io_delta != "-" and io_delta.isdigit():
+            n = int(io_delta)
+            text = f"{text} — {n} block request{'' if n == 1 else 's'} since last sample"
+        per_drive.setdefault(name, []).append((ts, state, text))
     for samples in per_drive.values():
         samples.sort(key=lambda s: s[0])
     return per_drive

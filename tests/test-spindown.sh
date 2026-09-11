@@ -158,4 +158,31 @@ assert_exit0 "a parked drive is left alone" \
     spindown_apply_drive testdrive test-uuid 242
 assert_empty "and is never touched with hdparm" "$(cat "$HDPARM_CALLS")"
 
+# ── spin_sample.sh: I/O delta column (#4) ───────────────────────────────────────
+# The delta exists to tell a cache-miss stat (single digits) apart from
+# something walking the drive (tens of thousands), because the wake *reason*
+# column has been observed naming a sync job on a night when no sync job
+# touched the platter. The subtle case is a counter reset: /sys/block/<d>/stat
+# restarts at boot or on a replug, and a naive subtraction would then report a
+# hugely negative or bogus delta on exactly the sample after a reboot.
+
+# Mirrors the delta arithmetic in modules/drives/spin_sample.sh.
+io_delta() {
+    local io_now="$1" io_prev="$2"
+    if [[ "$io_now" == "-" ]]; then echo "-"; return; fi
+    if [[ "$io_prev" =~ ^[0-9]+$ ]] && (( io_now >= io_prev )); then
+        echo $(( io_now - io_prev ))
+    else
+        echo "-"
+    fi
+}
+
+assert_eq "io delta: normal increase"             "84"  "$(io_delta 526151 526067)"
+assert_eq "io delta: idle drive reports zero"     "0"   "$(io_delta 1000 1000)"
+assert_eq "io delta: no baseline yet"             "-"   "$(io_delta 1000 '')"
+assert_eq "io delta: unreadable counter"          "-"   "$(io_delta - 1000)"
+# A reboot or replug resets the kernel counter; report nothing rather than a
+# fabricated number, and re-baseline on this sample.
+assert_eq "io delta: counter reset is not a delta" "-"  "$(io_delta 12 999999)"
+
 test_summary
