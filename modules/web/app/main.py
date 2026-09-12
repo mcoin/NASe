@@ -772,12 +772,50 @@ ATTACHMENT_DIR = Path(os.environ.get("NASE_ATTACHMENT_DIR",
 MAX_ATTACHMENT_BYTES = 4 * 1024 * 1024
 MAX_ATTACHMENTS_PER_ITEM = 10
 
-_ATTACH_ERRORS = {
+# ── Reporting a refused write (backlog #28) ───────────────────────────────────
+# Every mutating backlog endpoint used to answer 303 whether or not it had done
+# anything: a bad rel_type, a target that did not exist, an empty comment, a
+# non-http URL — all fell through one `if` and redirected as though they had
+# worked. That was found the hard way, by two link requests sent with the field
+# named `type` instead of `rel_type` which both returned 303 and created
+# nothing. The uploads path already did this properly, so this generalises its
+# table and query-parameter round trip rather than inventing a second one.
+_FORM_ERRORS = {
+    # Attachments.
     "too_big":      f"That image is larger than {MAX_ATTACHMENT_BYTES // (1024 * 1024)} MB — it was not added.",
     "not_an_image": "That file is not a PNG, JPEG, GIF or WebP image — it was not added.",
     "too_many":     f"This ticket already has {MAX_ATTACHMENTS_PER_ITEM} images — remove one first.",
     "none":         "No file was chosen.",
+    # Links between tickets.
+    "bad_rel_type": "That is not a relationship NASe recognises — no link was created.",
+    "bad_target":   "No such ticket — no link was created.",
+    "self_link":    "A ticket cannot be linked to itself — no link was created.",
+    # External links.
+    "bad_url":      "External links must start with http:// or https:// — nothing was added.",
+    # Comments.
+    "empty_comment": "The comment was empty — nothing was added.",
+    # Creating and editing.
+    "empty_title":  "A ticket needs a title — nothing was created.",
+    "bad_type":     "That is not a ticket type NASe recognises — the ticket was left unchanged.",
+    "bad_status":   "That is not a status NASe recognises — the ticket was left unchanged.",
 }
+
+def _reject(request: Request, code: str, redirect_to: str):
+    """Refuse a form write, and say so.
+
+    Browsers get a 303 back to the page they came from carrying ?err=<code>,
+    which renders as a sentence — the same round trip uploads already used.
+    Anything that is not asking for HTML gets a 400 with the reason, because
+    the whole point is that a script must not record success for a write that
+    never happened. The accept-header split mirrors the one in
+    http_exception_handler above, which already serves humans a styled page
+    while machine clients and SSE streams get JSON."""
+    if "text/html" not in request.headers.get("accept", ""):
+        return JSONResponse(
+            {"detail": _FORM_ERRORS.get(code, "Request rejected."), "error": code},
+            status_code=400)
+    sep = "&" if "?" in redirect_to else "?"
+    return RedirectResponse(url=f"{redirect_to}{sep}err={code}", status_code=303)
 
 # Type is decided by what the bytes actually are, never by the upload's
 # Content-Type or the filename's extension — both are attacker-controlled and
@@ -1185,8 +1223,24 @@ async def backlog_add(request: Request):
     form  = await request.form()
     title = (form.get("title") or "").strip()
     type_ = form.get("type") or "feature"
-    if type_ not in _BACKLOG_TYPES:
-        type_ = "feature"
+
+    # This one answers with a partial rather than a redirect, so a refusal is
+    # rendered straight back into the card instead of round-tripping through
+    # ?err= — but a non-browser client still has to be told, since an empty
+    # title silently creating nothing is the same defect as the rest of #28.
+    err = None
+    if not title:
+        err = "empty_title"
+    elif type_ not in _BACKLOG_TYPES:
+        err = "bad_type"
+    if err:
+        if not request.headers.get("hx-request"):
+            return _reject(request, err, "/backlog")
+        return templates.TemplateResponse(request, "partials/backlog_list.html", {
+            "backlog":    backlog_view(_BACKLOG_DEFAULT_FILTER, "all"),
+            "form_error": _FORM_ERRORS[err],
+        })
+
     with _backlog_lock:
         data = load_backlog()
         if title:
@@ -1237,7 +1291,7 @@ async def backlog_reorder(request: Request):
 
 @_protected.get("/backlog/{item_id}", response_class=HTMLResponse)
 async def backlog_detail(request: Request, item_id: int,
-                          attach: str = Query("")):
+                          err: str = Query("")):
     cfg  = load_config()
     data = load_backlog()
     item = find_backlog_item(data, item_id)
@@ -1253,9 +1307,10 @@ async def backlog_detail(request: Request, item_id: int,
         "links":        resolve_backlog_links(data, item),
         "link_options": link_options,
         "relations":    BACKLOG_RELATIONS,
-        # A rejected upload redirects back here with a reason, so the person
-        # who just picked a 12 MB photo is told why nothing appeared.
-        "attach_error": _ATTACH_ERRORS.get(attach),
+        # Any refused write redirects back here with a reason, so the person
+        # who just picked a 12 MB photo — or mistyped a URL, or posted an
+        # empty comment — is told why nothing appeared (#28).
+        "form_error": _FORM_ERRORS.get(err),
     })
 
 @_protected.post("/backlog/{item_id}/links/add")
@@ -1263,21 +1318,33 @@ async def backlog_link_add(item_id: int, request: Request):
     form      = await request.form()
     rel_type  = form.get("rel_type") or ""
     target_id = form.get("target_id") or ""
+    back      = f"/backlog/{item_id}"
+    # Checked one at a time so the answer names the actual problem. Posting
+    # `type=` instead of `rel_type=` is the mistake that opened #28, and it
+    # now says "not a relationship NASe recognises" instead of 303.
+    if rel_type not in BACKLOG_RELATIONS:
+        return _reject(request, "bad_rel_type", back)
+    if not target_id.isdigit():
+        return _reject(request, "bad_target", back)
+    if int(target_id) == item_id:
+        return _reject(request, "self_link", back)
     with _backlog_lock:
         data = load_backlog()
         item = find_backlog_item(data, item_id)
-        target = find_backlog_item(data, int(target_id)) if target_id.isdigit() else None
-        if item is not None and target is not None and target["id"] != item_id \
-           and rel_type in BACKLOG_RELATIONS:
-            inverse = BACKLOG_RELATIONS[rel_type]["inverse"]
-            if not any(l["type"] == rel_type and l["target_id"] == target["id"]
-                       for l in item["links"]):
-                item["links"].append({"type": rel_type, "target_id": target["id"]})
-            if not any(l["type"] == inverse and l["target_id"] == item_id
-                       for l in target["links"]):
-                target["links"].append({"type": inverse, "target_id": item_id})
-            save_backlog(data)
-    return RedirectResponse(url=f"/backlog/{item_id}", status_code=303)
+        target = find_backlog_item(data, int(target_id))
+        if item is None:
+            raise HTTPException(status_code=404, detail="Backlog item not found")
+        if target is None:
+            return _reject(request, "bad_target", back)
+        inverse = BACKLOG_RELATIONS[rel_type]["inverse"]
+        if not any(l["type"] == rel_type and l["target_id"] == target["id"]
+                   for l in item["links"]):
+            item["links"].append({"type": rel_type, "target_id": target["id"]})
+        if not any(l["type"] == inverse and l["target_id"] == item_id
+                   for l in target["links"]):
+            target["links"].append({"type": inverse, "target_id": item_id})
+        save_backlog(data)
+    return RedirectResponse(url=back, status_code=303)
 
 @_protected.post("/backlog/{item_id}/links/remove")
 async def backlog_link_remove(item_id: int, request: Request):
@@ -1303,10 +1370,12 @@ async def backlog_link_remove(item_id: int, request: Request):
 async def backlog_comment_add(item_id: int, request: Request):
     form = await request.form()
     text = (form.get("text") or "").strip()
+    if not text:
+        return _reject(request, "empty_comment", f"/backlog/{item_id}")
     with _backlog_lock:
         data = load_backlog()
         item = find_backlog_item(data, item_id)
-        if item is not None and text:
+        if item is not None:
             item["comments"].append({
                 "id":         _next_sub_id(item["comments"]),
                 "text":       text,
@@ -1320,17 +1389,17 @@ async def backlog_attachment_add(item_id: int, request: Request):
     form = await request.form()
     upload = form.get("image")
     if upload is None or not hasattr(upload, "read"):
-        return RedirectResponse(url=f"/backlog/{item_id}?attach=none", status_code=303)
+        return RedirectResponse(url=f"/backlog/{item_id}?err=none", status_code=303)
 
     # Read one byte past the cap so an oversized file is refused without
     # holding an unbounded amount of it in memory.
     payload = await upload.read(MAX_ATTACHMENT_BYTES + 1)
     if len(payload) > MAX_ATTACHMENT_BYTES:
-        return RedirectResponse(url=f"/backlog/{item_id}?attach=too_big", status_code=303)
+        return RedirectResponse(url=f"/backlog/{item_id}?err=too_big", status_code=303)
 
     sniffed = sniff_image(payload[:16])
     if sniffed is None:
-        return RedirectResponse(url=f"/backlog/{item_id}?attach=not_an_image", status_code=303)
+        return RedirectResponse(url=f"/backlog/{item_id}?err=not_an_image", status_code=303)
     media_type, ext = sniffed
 
     with _backlog_lock:
@@ -1339,7 +1408,7 @@ async def backlog_attachment_add(item_id: int, request: Request):
         if item is None:
             raise HTTPException(status_code=404, detail="Backlog item not found")
         if len(item["attachments"]) >= MAX_ATTACHMENTS_PER_ITEM:
-            return RedirectResponse(url=f"/backlog/{item_id}?attach=too_many", status_code=303)
+            return RedirectResponse(url=f"/backlog/{item_id}?err=too_many", status_code=303)
 
         attachment_id = _next_sub_id(item["attachments"])
         stored_name = f"{attachment_id}-{secrets.token_hex(8)}.{ext}"
@@ -1417,10 +1486,15 @@ async def backlog_extlink_add(item_id: int, request: Request):
     form  = await request.form()
     url   = _safe_url(form.get("url") or "")
     label = (form.get("label") or "").strip()
+    # The one rejection an ordinary user can reach today: the URL field is
+    # free text, unlike rel_type and status which the UI fills from selects.
+    # A typo, or a deliberate smb:// path, used to be dropped without a word.
+    if url is None:
+        return _reject(request, "bad_url", f"/backlog/{item_id}")
     with _backlog_lock:
         data = load_backlog()
         item = find_backlog_item(data, item_id)
-        if item is not None and url:
+        if item is not None:
             item["external_links"].append({
                 "id":    _next_sub_id(item["external_links"]),
                 "url":   url,
@@ -1447,11 +1521,17 @@ async def backlog_update(request: Request, item_id: int):
     form   = await request.form()
     title  = (form.get("title") or "").strip()
     type_  = form.get("type") or "feature"
-    if type_ not in _BACKLOG_TYPES:
-        type_ = "feature"
     status = form.get("status") or "open"
+    back   = f"/backlog/{item_id}"
+    # Refuse rather than coerce. These used to fall back to "feature" and
+    # "open", so a typo did not fail — it quietly rewrote the field, and
+    # silently changing a ticket's status is worse than refusing the request
+    # (#28). This handler already raised 404 for a missing item, so it was
+    # inconsistent with itself about whether errors are worth reporting.
+    if type_ not in _BACKLOG_TYPES:
+        return _reject(request, "bad_type", back)
     if status not in _BACKLOG_STATUSES:
-        status = "open"
+        return _reject(request, "bad_status", back)
     with _backlog_lock:
         data = load_backlog()
         item = find_backlog_item(data, item_id)

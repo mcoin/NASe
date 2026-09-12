@@ -1092,7 +1092,7 @@ def test_attachment_rejects_a_non_image_claiming_to_be_one(attach_client, auth_h
     r = _upload(attach_client, auth_headers, b"#!/bin/sh\nrm -rf /\n",
                 filename="totally.png", content_type="image/png")
     assert r.status_code == 303
-    assert "attach=not_an_image" in r.headers["location"]
+    assert "err=not_an_image" in r.headers["location"]
     # .get(): a rejected upload writes nothing at all, so the stored item never
     # even gains the key — load_backlog() backfills it in memory only.
     assert json.loads(backlog_file.read_text())["items"][0].get("attachments", []) == []
@@ -1103,7 +1103,7 @@ def test_attachment_rejects_svg(attach_client, auth_headers, backlog_file):
     _one_item(backlog_file)
     svg = b'<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'
     r = _upload(attach_client, auth_headers, svg, filename="x.svg", content_type="image/svg+xml")
-    assert "attach=not_an_image" in r.headers["location"]
+    assert "err=not_an_image" in r.headers["location"]
 
 
 def test_attachment_enforces_the_size_cap(attach_client, auth_headers, backlog_file):
@@ -1111,7 +1111,7 @@ def test_attachment_enforces_the_size_cap(attach_client, auth_headers, backlog_f
     _one_item(backlog_file)
     too_big = PNG_1PX + b"\x00" * (m.MAX_ATTACHMENT_BYTES + 1)
     r = _upload(attach_client, auth_headers, too_big)
-    assert "attach=too_big" in r.headers["location"]
+    assert "err=too_big" in r.headers["location"]
     assert json.loads(backlog_file.read_text())["items"][0].get("attachments", []) == []
 
 
@@ -1121,7 +1121,7 @@ def test_attachment_enforces_the_count_cap(attach_client, auth_headers, backlog_
     for _ in range(m.MAX_ATTACHMENTS_PER_ITEM):
         _upload(attach_client, auth_headers, PNG_1PX)
     r = _upload(attach_client, auth_headers, PNG_1PX)
-    assert "attach=too_many" in r.headers["location"]
+    assert "err=too_many" in r.headers["location"]
     assert len(json.loads(backlog_file.read_text())["items"][0]["attachments"]) == \
         m.MAX_ATTACHMENTS_PER_ITEM
 
@@ -1180,7 +1180,7 @@ def test_detail_page_shows_the_thumbnail_and_the_upload_form(attach_client, auth
 
 def test_detail_page_reports_a_rejected_upload(attach_client, auth_headers, backlog_file):
     _one_item(backlog_file)
-    html = attach_client.get("/backlog/1?attach=too_big", headers=auth_headers).text
+    html = attach_client.get("/backlog/1?err=too_big", headers=auth_headers).text
     assert "larger than 4 MB" in html
 
 
@@ -1249,3 +1249,143 @@ def test_spin_history_skips_malformed_lines(tmp_path, monkeypatch):
                         "100\tprimary\n"
                         "300\tprimary\tactive\testimated\t-\t0\n")
     assert [s[0] for s in out["primary"]] == [300]
+
+
+# ── Refused writes are reported, not swallowed (#28) ───────────────────────────
+# Every mutating endpoint used to answer 303 whether or not it had done
+# anything. The failure mode was invisible: nothing in the log, nothing on the
+# page, and a success status code — so a script recorded success for writes
+# that never happened. Each case below asserts both halves: the item is
+# unchanged, and the caller was told.
+
+HTML_FORM = {"Accept": "text/html,application/xhtml+xml"}
+
+
+def _two_items(backlog_file):
+    write_backlog(backlog_file, [(1, "first", "open", "bug"),
+                                 (2, "second", "open", "feature")])
+
+
+def _item(backlog_file, n=0):
+    return json.loads(backlog_file.read_text())["items"][n]
+
+
+def test_link_add_with_the_wrong_field_name_is_refused(client, auth_headers, backlog_file):
+    """The exact bug that opened #28: two requests sent `type=` instead of
+    `rel_type=`, both answered 303, and neither created a link."""
+    _two_items(backlog_file)
+    r = client.post("/backlog/1/links/add", headers={**auth_headers, **HTML_FORM},
+                    data={"type": "relates_to", "target_id": "2"}, follow_redirects=False)
+    assert r.status_code == 303
+    assert "err=bad_rel_type" in r.headers["location"]
+    assert _item(backlog_file)["links"] == []
+
+
+def test_link_add_reports_each_rejection_distinctly(client, auth_headers, backlog_file):
+    _two_items(backlog_file)
+    cases = [
+        ({"rel_type": "invented", "target_id": "2"}, "bad_rel_type"),
+        ({"rel_type": "relates_to", "target_id": "99"}, "bad_target"),
+        ({"rel_type": "relates_to", "target_id": "not-a-number"}, "bad_target"),
+        ({"rel_type": "relates_to", "target_id": "1"}, "self_link"),
+    ]
+    for data, code in cases:
+        r = client.post("/backlog/1/links/add", headers={**auth_headers, **HTML_FORM},
+                        data=data, follow_redirects=False)
+        assert f"err={code}" in r.headers["location"], data
+    assert _item(backlog_file)["links"] == []
+
+
+def test_a_valid_link_still_works(client, auth_headers, backlog_file):
+    _two_items(backlog_file)
+    r = client.post("/backlog/1/links/add", headers={**auth_headers, **HTML_FORM},
+                    data={"rel_type": "relates_to", "target_id": "2"}, follow_redirects=False)
+    assert r.status_code == 303
+    assert "err=" not in r.headers["location"]
+    assert _item(backlog_file)["links"] == [{"type": "relates_to", "target_id": 2}]
+
+
+def test_a_script_gets_400_not_a_redirect(client, auth_headers, backlog_file):
+    """The reason this matters: a client that is not a browser must not be able
+    to record success for a write that did not happen."""
+    _two_items(backlog_file)
+    r = client.post("/backlog/1/links/add", headers=auth_headers,
+                    data={"type": "relates_to", "target_id": "2"}, follow_redirects=False)
+    assert r.status_code == 400
+    assert r.json()["error"] == "bad_rel_type"
+    assert _item(backlog_file)["links"] == []
+
+
+def test_external_link_with_a_non_http_url_is_refused(client, auth_headers, backlog_file):
+    """The one an ordinary user can reach: the URL field is free text."""
+    _two_items(backlog_file)
+    r = client.post("/backlog/1/extlinks/add", headers={**auth_headers, **HTML_FORM},
+                    data={"url": "smb://nas/share", "label": "share"},
+                    follow_redirects=False)
+    assert "err=bad_url" in r.headers["location"]
+    assert _item(backlog_file)["external_links"] == []
+
+
+def test_empty_comment_is_refused(client, auth_headers, backlog_file):
+    _two_items(backlog_file)
+    r = client.post("/backlog/1/comments/add", headers={**auth_headers, **HTML_FORM},
+                    data={"text": "   "}, follow_redirects=False)
+    assert "err=empty_comment" in r.headers["location"]
+    assert _item(backlog_file)["comments"] == []
+
+
+def test_update_refuses_a_bad_status_instead_of_coercing_it(client, auth_headers, backlog_file):
+    """The worst of the set: an unrecognised status used to become "open", so a
+    typo did not fail — it quietly changed the ticket."""
+    _two_items(backlog_file)
+    r = client.post("/backlog/1", headers={**auth_headers, **HTML_FORM},
+                    data={"title": "first", "type": "bug", "status": "dnoe",
+                          "description": "", "implementation_details": ""},
+                    follow_redirects=False)
+    assert "err=bad_status" in r.headers["location"]
+    item = _item(backlog_file)
+    assert item["status"] == "open"     # unchanged, not coerced from "dnoe"
+    assert item["title"] == "first"
+
+
+def test_update_refuses_a_bad_type_instead_of_coercing_it(client, auth_headers, backlog_file):
+    _two_items(backlog_file)
+    r = client.post("/backlog/1", headers={**auth_headers, **HTML_FORM},
+                    data={"title": "first", "type": "buug", "status": "open",
+                          "description": "", "implementation_details": ""},
+                    follow_redirects=False)
+    assert "err=bad_type" in r.headers["location"]
+    assert _item(backlog_file)["type"] == "bug"   # not rewritten to "feature"
+
+
+def test_update_does_not_discard_edits_it_refuses(client, auth_headers, backlog_file):
+    """A refused Save must leave everything alone, not apply the good fields."""
+    _two_items(backlog_file)
+    client.post("/backlog/1", headers={**auth_headers, **HTML_FORM},
+                data={"title": "a new title", "type": "bug", "status": "nonsense",
+                      "description": "new text", "implementation_details": ""},
+                follow_redirects=False)
+    item = _item(backlog_file)
+    assert item["title"] == "first"
+    assert item["description"] == ""
+
+
+def test_add_with_an_empty_title_says_so_in_the_partial(client, auth_headers, backlog_file):
+    _two_items(backlog_file)
+    r = client.post("/backlog/add", headers={**auth_headers, "HX-Request": "true"},
+                    data={"title": "   ", "type": "bug"})
+    assert r.status_code == 200
+    assert "A ticket needs a title" in r.text
+    assert len(json.loads(backlog_file.read_text())["items"]) == 2
+
+
+def test_the_detail_page_renders_the_reason(client, auth_headers, backlog_file):
+    _two_items(backlog_file)
+    html = client.get("/backlog/1?err=bad_rel_type", headers=auth_headers).text
+    assert "not a relationship NASe recognises" in html
+
+
+def test_an_unknown_error_code_renders_nothing(client, auth_headers, backlog_file):
+    _two_items(backlog_file)
+    html = client.get("/backlog/1?err=made-up", headers=auth_headers).text
+    assert "form-error-banner" not in html

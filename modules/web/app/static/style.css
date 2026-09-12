@@ -1311,3 +1311,15 @@ td.mono  { font-family: monospace; font-size: 0.8rem; color: var(--muted); }
 }
 
 .attachment-error { color: var(--err); }
+
+/* A refused write, reported where the eye lands rather than beside whichever
+   of the page's forms was rejected — five of them can produce one (#28). */
+.form-error-banner {
+  margin: 0 0 0.75rem 0;
+  padding: 0.55rem 0.8rem;
+  border-radius: 6px;
+  border-left: 3px solid var(--err);
+  background: var(--err-bg);
+  color: var(--err);
+  font-size: 0.85rem;
+}

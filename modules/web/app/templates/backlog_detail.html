@@ -3,6 +3,11 @@
 
 {% block content %}
 {% import "partials/_status_badge.html" as badges %}
+{# One place a refused write is reported, whichever form it came from: the
+   error round-trips as ?err=<code> and is looked up in _FORM_ERRORS. It sits
+   above the card rather than beside the form that failed, because five
+   different forms on this page can land here (backlog #28). #}
+{% if form_error %}<p class="form-error-banner">{{ form_error }}</p>{% endif %}
 <div class="card">
   <div class="card-head">
     <span class="backlog-detail-head">
@@ -160,8 +165,6 @@
     {% else %}
     <div class="changes-empty">No screenshots yet.</div>
     {% endif %}
-
-    {% if attach_error %}<p class="form-hint attachment-error">{{ attach_error }}</p>{% endif %}
 
     {# accept="image/*" is what makes a phone offer Take Photo / Photo Library,
        which is where these screenshots come from. #}

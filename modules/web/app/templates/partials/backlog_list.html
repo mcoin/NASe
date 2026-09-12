@@ -22,6 +22,8 @@
     {% endfor %}
   </div>
 
+  {% if form_error %}<p class="form-error-banner">{{ form_error }}</p>{% endif %}
+
   <form class="backlog-add" hx-post="/backlog/add" hx-target="#backlog-card" hx-swap="outerHTML">
     <input class="form-input" type="text" name="title" placeholder="New backlog item..." required>
     <select class="form-input form-select backlog-type-select" name="type">
