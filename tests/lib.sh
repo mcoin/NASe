@@ -2,6 +2,37 @@
 # tests/lib.sh — shared test harness.
 # Source this file from test scripts; do not execute directly.
 
+# ── Keep the tests out of live NASe state (backlog #35) ──────────────────────
+# Running the suite used to write into /var/log/nase/nase.log and
+# /var/lib/nase/, and the damage was not cosmetic: ERROR lines provoked
+# deliberately by tests/test-sync-setup.sh ended up in a real emailed status
+# report, and modules/drives/spin_status.sh deleting a live state file made the
+# next sample record a drive wake that never happened, in the history backlog
+# #4 is judged on.
+#
+# These are exported, which matters for two different leak modes. A suite that
+# runs the code under test as a child process needs the variable inherited; a
+# suite that *sources* a NASe library into its own shell — tests/test-integrity.sh
+# does this with modules/integrity/common.sh — resolves these from its own
+# environment, where an env-prefix on some later `bash ...` call never reaches.
+# Exporting here covers both, for every suite, since all of them source this
+# file before doing anything else.
+#
+# A suite that wants its own paths still just sets them: an `export` in the
+# suite or an env-prefix at the point of invocation both take precedence.
+#
+# Deliberately a fixed path rather than `mktemp -d` with an EXIT trap. Bash
+# traps are not additive — the suites register `trap 'rm -rf "$WORK"' EXIT`
+# after sourcing this file, which would silently replace a trap set here and
+# leak a directory into /tmp on every run. tests/run-tests.sh clears this at
+# the start of a run instead, which also leaves it behind for inspection when
+# a suite fails.
+NASE_TEST_SCRATCH="${TMPDIR:-/tmp}/nase-tests"
+export NASE_TEST_SCRATCH
+export NAS_LOG="${NAS_LOG:-${NASE_TEST_SCRATCH}/nase.log}"
+export NASE_STAMP_DIR="${NASE_STAMP_DIR:-${NASE_TEST_SCRATCH}/varlib}"
+mkdir -p "$(dirname "$NAS_LOG")" "$NASE_STAMP_DIR" 2>/dev/null || true
+
 TESTS_PASS=0
 TESTS_FAIL=0
 TESTS_SKIP=0
