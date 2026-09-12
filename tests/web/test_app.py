@@ -1389,3 +1389,133 @@ def test_an_unknown_error_code_renders_nothing(client, auth_headers, backlog_fil
     _two_items(backlog_file)
     html = client.get("/backlog/1?err=made-up", headers=auth_headers).text
     assert "form-error-banner" not in html
+
+
+# ── Config editor: comments between items inside a section (#19) ────────────────
+# #10 rescued the comment block documenting the *next* section. This is the same
+# loss one level down: a note written above the third sync job. The Form view
+# marshals comment-free YAML in the browser, so a save used to replace the whole
+# subtree and take any such comment with it.
+
+CONFIG_WITH_ITEM_COMMENTS = """\
+nas:
+  hostname: test-nas
+
+sync_jobs:
+  - name: alpha
+    source: /mnt/primary/alpha/
+  # beta only exists because of the odd camera export
+  - name: beta
+    source: /mnt/primary/beta/
+  # gamma is the slow one — runs last on purpose
+  - name: gamma
+    source: /mnt/primary/gamma/
+
+services:
+  web:
+    enabled: true
+"""
+
+BETA_NOTE  = "beta only exists because of the odd camera export"
+GAMMA_NOTE = "gamma is the slow one"
+
+
+def _save_jobs(m, config_file, *jobs):
+    """Marshal jobs the way the Form view does: plain YAML, no comments."""
+    body = "".join(f"- name: {n}\n  source: /mnt/primary/{n}/\n" for n in jobs)
+    m._save_section("sync_jobs", body)
+    return config_file.read_text()
+
+
+def _comment_precedes(text, note, name):
+    """The note appears, and introduces the item called `name`."""
+    if note not in text or f"name: {name}" not in text:
+        return False
+    return text.index(note) < text.index(f"name: {name}")
+
+
+def test_item_comment_survives_an_in_place_save(config_file, monkeypatch):
+    import modules.web.app.main as m
+    monkeypatch.setattr(m, "CONFIG_FILE", config_file)
+    config_file.write_text(CONFIG_WITH_ITEM_COMMENTS)
+    text = _save_jobs(m, config_file, "alpha", "beta", "gamma")
+    assert _comment_precedes(text, BETA_NOTE, "beta")
+    assert _comment_precedes(text, GAMMA_NOTE, "gamma")
+
+
+def test_item_comment_follows_its_item_when_jobs_are_reordered(config_file, monkeypatch):
+    """The reason identity matching is non-negotiable. Positionally, the note
+    about beta lives after alpha — so a positional merge would leave it
+    introducing whatever ends up second, which is the one outcome #19's
+    guardrail rules out."""
+    import modules.web.app.main as m
+    monkeypatch.setattr(m, "CONFIG_FILE", config_file)
+    config_file.write_text(CONFIG_WITH_ITEM_COMMENTS)
+    text = _save_jobs(m, config_file, "gamma", "beta", "alpha")
+    assert _comment_precedes(text, GAMMA_NOTE, "gamma")
+    assert _comment_precedes(text, BETA_NOTE, "beta")
+    # And specifically not reattached to the job that now sits where beta was.
+    assert text.index(GAMMA_NOTE) < text.index("name: gamma") < text.index(BETA_NOTE)
+
+
+def test_item_comment_survives_an_insertion_above_it(config_file, monkeypatch):
+    import modules.web.app.main as m
+    monkeypatch.setattr(m, "CONFIG_FILE", config_file)
+    config_file.write_text(CONFIG_WITH_ITEM_COMMENTS)
+    text = _save_jobs(m, config_file, "alpha", "inserted", "beta", "gamma")
+    assert "name: inserted" in text
+    assert _comment_precedes(text, BETA_NOTE, "beta")
+    # The new job must not inherit the note that belongs to beta.
+    assert text.index("name: inserted") < text.index(BETA_NOTE)
+
+
+def test_removing_a_job_takes_its_comment_and_leaves_the_others(config_file, monkeypatch):
+    """Losing the comment of a deleted item is correct — it documented that
+    item. What must not happen is it surviving to introduce another one."""
+    import modules.web.app.main as m
+    monkeypatch.setattr(m, "CONFIG_FILE", config_file)
+    config_file.write_text(CONFIG_WITH_ITEM_COMMENTS)
+    text = _save_jobs(m, config_file, "alpha", "gamma")
+    assert "name: beta" not in text
+    assert BETA_NOTE not in text
+    assert _comment_precedes(text, GAMMA_NOTE, "gamma")
+
+
+def test_editing_a_field_does_not_disturb_the_comments(config_file, monkeypatch):
+    import modules.web.app.main as m
+    monkeypatch.setattr(m, "CONFIG_FILE", config_file)
+    config_file.write_text(CONFIG_WITH_ITEM_COMMENTS)
+    m._save_section("sync_jobs",
+                    "- name: alpha\n  source: /mnt/primary/alpha/\n"
+                    "- name: beta\n  source: /mnt/primary/CHANGED/\n"
+                    "- name: gamma\n  source: /mnt/primary/gamma/\n")
+    text = config_file.read_text()
+    assert "/mnt/primary/CHANGED/" in text
+    assert _comment_precedes(text, BETA_NOTE, "beta")
+    assert _comment_precedes(text, GAMMA_NOTE, "gamma")
+
+
+def test_section_header_rescue_from_10_still_works(config_file, monkeypatch):
+    """The two passes run back to back; neither may undo the other."""
+    import modules.web.app.main as m
+    monkeypatch.setattr(m, "CONFIG_FILE", config_file)
+    config_file.write_text(CONFIG_WITH_SECTION_HEADER)
+    m._save_section("sync_jobs", "- name: data\n  source: /mnt/primary/data/\n")
+    text = config_file.read_text()
+    assert "Checksum integrity manifest" in text
+    assert 0 < text.index("Checksum integrity manifest") < text.index("integrity:")
+
+
+def test_the_repos_own_config_round_trips_byte_identically(monkeypatch, tmp_path):
+    """The guardrail carried over from #10: the re-anchor passes must not
+    quietly reformat the real file. Byte-for-byte, or the pass is not safe to
+    run on every save."""
+    import io
+    import modules.web.app.main as m
+    src = (REPO_ROOT / "config.yaml").read_text()
+    ry  = m._make_ryaml()
+    doc = ry.load(io.StringIO(src))
+    m._reanchor_section_comments(doc)
+    m._reanchor_item_comments(doc)
+    buf = io.StringIO(); ry.dump(doc, buf)
+    assert buf.getvalue() == src
