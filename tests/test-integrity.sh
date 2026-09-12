@@ -218,4 +218,60 @@ assert_eq "reconcile-backup: delete removes dest row" \
 assert_eq "reconcile-backup: delete does not touch source row" \
     "1" "$(sqlite3 "$SRC_DRIVE/.nase/integrity.db" "SELECT COUNT(*) FROM files WHERE path='movies/a.mp4';")"
 
+# ── integrity_purge_internal_rows + resample exclusion (#36) ──────────────────
+# Nothing under .nase/ or .trash/ is user data. The discovery walk has always
+# pruned both, but reconcile-primary.sh consumed primary-events.log without the
+# exclusion until 92737fc, so older manifests carry rows from that gap. Two
+# survived on the live drive and neither was harmless: the manifest's own
+# scratch file was flagged "missing" and showed as an anomaly in every weekly
+# report, and .nase/integrity.db sat at status ok awaiting a resample whose
+# checksum could not possibly have matched.
+# NOT a subshell: assert_* counters live in the parent shell, and a FAIL
+# inside a ( ... ) group is printed but never counted, so the suite would
+# exit 0 with a broken assertion. See the harness bug filed alongside #36.
+source "${REPO_ROOT}/lib/log.sh"
+source "${REPO_ROOT}/modules/integrity/common.sh"
+
+PDB="${WORK}/purge.db"
+sqlite3 "$PDB" < "${REPO_ROOT}/modules/integrity/schema.sql"
+sqlite3 "$PDB" "
+  INSERT INTO files(path,size,mtime,checksum,status,first_seen,last_updated,last_checked) VALUES
+    ('movies/keep.mkv',1,1,'a','ok',1,1,1),
+    ('.nase/integrity.db',1,1,'b','ok',1,1,1),
+    ('.nase/tmp/tmp.XXXX',1,1,'c','flagged',1,1,1),
+    ('.trash/2026-01-01/old.txt',1,1,'d','ok',1,1,1);
+  INSERT INTO events(ts,event_type,path,detail)
+    VALUES (1,'missing','.nase/tmp/tmp.XXXX','file no longer present');"
+
+integrity_purge_internal_rows "$PDB" >/dev/null
+assert_eq "purge removes every .nase/ and .trash/ row" "0" \
+    "$(sqlite3 "$PDB" "SELECT COUNT(*) FROM files WHERE path LIKE '.nase/%' OR path LIKE '.trash/%';")"
+assert_eq "and leaves user data alone" "movies/keep.mkv" \
+    "$(sqlite3 "$PDB" "SELECT path FROM files;")"
+# Events are an audit log: a historical entry is a true record of what
+# happened, even once the row it described is gone.
+assert_eq "events are left as history" "1" \
+    "$(sqlite3 "$PDB" "SELECT COUNT(*) FROM events;")"
+
+integrity_purge_internal_rows "$PDB" >/dev/null
+assert_eq "purge is idempotent" "1" \
+    "$(sqlite3 "$PDB" "SELECT COUNT(*) FROM files;")"
+
+assert_exit0 "purge on a missing db is not an error" \
+    integrity_purge_internal_rows "${WORK}/does-not-exist.db"
+
+# Defence in depth: even with a row present, resampling must never pick it.
+RDB="${WORK}/resample.db"
+sqlite3 "$RDB" < "${REPO_ROOT}/modules/integrity/schema.sql"
+sqlite3 "$RDB" "
+  INSERT INTO files(path,size,mtime,checksum,status,first_seen,last_updated,last_checked) VALUES
+    ('movies/a.mkv',1,1,'a','ok',1,1,1),
+    ('.nase/integrity.db',1,1,'b','ok',1,1,1),
+    ('.trash/x/old.txt',1,1,'d','ok',1,1,1);"
+picked=$(sqlite3 "$RDB" "SELECT path FROM files
+  WHERE status='ok' AND mtime < 99999999
+    AND path NOT LIKE '.nase/%' AND path NOT LIKE '.trash/%'
+  ORDER BY last_checked ASC;")
+assert_eq "resample never selects the manifest's own files" "movies/a.mkv" "$picked"
+
 test_summary

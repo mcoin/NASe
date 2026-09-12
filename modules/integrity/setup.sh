@@ -89,6 +89,10 @@ for i in $(seq 0 $((n - 1))); do
             chmod 0700 "$nase_dir"
         fi
         _set_journal_mode
+        # Drop any row describing NASe's own internals before refreshing the
+        # cache, so the counts below never include them (backlog #36). A no-op
+        # on a manifest that never had any.
+        [[ "$is_ro" == "true" ]] || integrity_purge_internal_rows "$db"
         # apply.sh already has this drive mounted/awake for the checks
         # above, so refreshing the dashboard's SD-card cache here is free —
         # keeps it in sync even if nothing else touches this drive tonight.

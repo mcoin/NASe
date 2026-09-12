@@ -193,6 +193,37 @@ integrity_status_cache_path() {
 # whatever was last written here (see "updated_at"), so it lags reality by
 # however long it's been since the drive last actually ran an integrity
 # pass — that's the deliberate trade for never waking the drive just to look.
+# integrity_purge_internal_rows DB
+# Remove any manifest row describing NASe's own internals. Nothing under
+# .nase/ or .trash/ is user data and none of it should ever have been indexed;
+# the discovery walk has pruned both since the module was written, but
+# reconcile-primary.sh consumed primary-events.log without the exclusion until
+# 92737fc (2026-07-17), so installs older than that carry rows from the gap.
+#
+# Two of them survived here (backlog #36) and neither was harmless: the
+# manifest's own scratch file was flagged 'missing' once its temp file was
+# cleaned up, showing as an anomaly in every weekly status report, and
+# .nase/integrity.db sat at status 'ok' waiting to be resampled, at which
+# point its checksum could not possibly have matched the one recorded in July
+# and it would have been reported as a mismatch — data corruption, to anyone
+# reading the report.
+#
+# Idempotent, so it can run on every apply: on a clean manifest it deletes
+# nothing. Events are deliberately left alone — they are an audit log, and a
+# historical entry is a true record of what happened at the time.
+integrity_purge_internal_rows() {
+    local db="$1" n
+    [[ -f "$db" ]] || return 0
+    n=$(sqlite3 -bail -cmd ".timeout 30000" "$db" \
+        "SELECT COUNT(*) FROM files WHERE path LIKE '.nase/%' OR path LIKE '.trash/%';" \
+        2>/dev/null) || return 0
+    [[ "${n:-0}" -gt 0 ]] || return 0
+    sqlite3 -bail -cmd ".timeout 30000" "$db" \
+        "DELETE FROM files WHERE path LIKE '.nase/%' OR path LIKE '.trash/%';" \
+        2>/dev/null || return 0
+    log_info "  Integrity: purged ${n} manifest row(s) describing NASe's own internals."
+}
+
 integrity_write_status_cache() {
     local mountpoint="$1" db="$2"
     local cache_dir cache_file tmp

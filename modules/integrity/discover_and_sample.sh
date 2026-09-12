@@ -277,8 +277,16 @@ if [[ "$UNCAPPED" != "true" ]] && [[ "$remaining_budget" -gt 0 ]]; then
     resample_sql=$(mktemp -p "$SCRATCH_DIR"); TMPFILES+=("$resample_sql")
     cat > "$resample_sql" <<SQL
 .separator "	"
+-- .nase/ and .trash/ are pruned from the discovery walk (phase 1), but that
+-- only stops new rows being added. A row that predates the exclusion sits in
+-- the manifest forever and is still picked up here, which is not academic:
+-- .nase/integrity.db was indexed on 2026-07-13 and resampling it would have
+-- compared a July checksum against a database this very script rewrites on
+-- every run — a guaranteed 'mismatch', reported as though the drive had
+-- corrupted data (backlog #36). Never re-check the manifest's own files.
 SELECT id, path, size, mtime, checksum FROM files
 WHERE status='ok' AND mtime < ${cutoff}
+  AND path NOT LIKE '.nase/%' AND path NOT LIKE '.trash/%'
 ORDER BY last_checked ASC LIMIT ${remaining_budget};
 SQL
     resample_rows=$(sqlite3 -bail -cmd ".timeout 30000" "$DB" < "$resample_sql")
