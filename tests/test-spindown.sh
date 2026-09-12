@@ -185,4 +185,33 @@ assert_eq "io delta: unreadable counter"          "-"   "$(io_delta - 1000)"
 # fabricated number, and re-baseline on this sample.
 assert_eq "io delta: counter reset is not a delta" "-"  "$(io_delta 12 999999)"
 
+# ── spin_status.sh keeps its state under NASE_STAMP_DIR (#29) ──────────────────
+# The state directory was hardcoded to /var/lib/nase/spin-state, so a test run
+# pointed at a scratch stamp dir still read and wrote live files. The damage
+# was not hypothetical: the "device is gone" branch does `rm -f` on the state
+# file, and tests/test-config-archive.sh drives the real spin_status.sh with a
+# fake config whose drive is named "primary" and whose UUID does not exist, so
+# running the suite deleted the live primary.state. The next sample then
+# reported a wake that never happened.
+SPIN_WORK=$(mktemp -d /tmp/nase-test-spinstate.XXXXXX)
+cat > "${SPIN_WORK}/config.yaml" <<'YAML'
+drives:
+  - name: primary
+    uuid: 00000000-0000-0000-0000-0000000000ff
+    mountpoint: /mnt/primary
+    active: true
+    spindown_min: 60
+YAML
+mkdir -p "${SPIN_WORK}/stamp/spin-state"
+echo "sentinel" > "${SPIN_WORK}/stamp/spin-state/primary.state"
+
+out=$(CONFIG_FILE="${SPIN_WORK}/config.yaml" NASE_STAMP_DIR="${SPIN_WORK}/stamp" \
+      bash "${REPO_ROOT}/modules/drives/spin_status.sh" primary 2>/dev/null || true)
+assert_eq "an absent drive reports unknown" "unknown - -" "$out"
+assert_file_absent "and clears its state file under NASE_STAMP_DIR" \
+    "${SPIN_WORK}/stamp/spin-state/primary.state"
+assert_file_exists "while the live state directory is left alone" \
+    "/var/lib/nase/spin-state/primary.state"
+rm -rf "$SPIN_WORK"
+
 test_summary

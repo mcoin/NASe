@@ -25,7 +25,17 @@ source "${REPO_ROOT}/lib/config.sh"
 
 name="${1:?Usage: spin_status.sh <drive-name>}"
 
-STATE_DIR="/var/lib/nase/spin-state"
+# Honours NASE_STAMP_DIR like every other piece of NASe state. It used to be
+# hardcoded, which meant a test run with NASE_STAMP_DIR pointed at a scratch
+# directory still read and wrote the live files. tests/test-config-archive.sh
+# drives archive.sh with a fake config whose drive is called "primary" and
+# carries a UUID that does not exist, so the "device is gone" branch below
+# deleted the real /var/lib/nase/spin-state/primary.state. The next sample
+# then took the "first observation — assume active" path and recorded a wake
+# that never happened, in the very history backlog #4 is judged on. Caught on
+# 2026-09-12 by the I/O column added in c3f2d3d: the sample said the drive had
+# woken while reporting zero block requests, which cannot both be true.
+STATE_DIR="${NASE_STAMP_DIR:-/var/lib/nase}/spin-state"
 mkdir -p "$STATE_DIR"
 state_file="${STATE_DIR}/${name}.state"
 

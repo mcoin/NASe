@@ -189,6 +189,16 @@ guess_wake_reason() {
         reason="SMART health check (nase-monitor)"
     fi
 
+    # The weekly status report used to read each drive's integrity manifest
+    # directly and wake both drives doing it (#29). It no longer does, but it
+    # still needs a branch here: without one its wakes fell through to the
+    # sync-job ledger and were reported as "sync job: <last job in the group>"
+    # — a job that had done no I/O at all. If this drive wakes on a report run
+    # again, the report should be the one named.
+    if [[ -z "$reason" ]] && unit_ran_recently nase-status-report.service "$window"; then
+        reason="status report (nase-status-report)"
+    fi
+
     if [[ -z "$reason" ]]; then
         local archive_dest
         archive_dest=$(config_get '.config_archive.dest // ""')

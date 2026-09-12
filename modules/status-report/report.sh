@@ -29,7 +29,66 @@ else
     since_ts=$(( $(date +%s) - 604800 ))
     since_str=$(date -d "@${since_ts}" '+%Y-%m-%d %H:%M:%S')
 fi
+now_ts=$(date +%s)
 now_str=$(date '+%Y-%m-%d %H:%M:%S')
+
+# ── Reading the integrity status cache ────────────────────────────────────────
+# The cache is JSON on the SD card. jq is not a NASe dependency (lib/checks.sh
+# requires yq, for YAML), but python3 is already used to read JSON in
+# modules/config-archive/archive.sh, so it is the established way to do this
+# here. One process per drive per section is nothing against a weekly report.
+
+# cache_summary <file> -> TSV: has total ok flagged complete cursor dtotal updated truncated
+cache_summary() {
+    python3 - "$1" <<'PY'
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+except Exception:
+    sys.exit(1)
+def s(key, default=""):
+    v = d.get(key)
+    return default if v is None else str(v)
+print("\t".join([
+    "true" if d.get("has_manifest") else "false",
+    s("total", "0"), s("ok", "0"), s("flagged", "0"),
+    "true" if d.get("discovery_complete") else "false",
+    s("discovery_cursor_n", "0"), s("discovery_total", "0"),
+    s("updated_at"),
+    "true" if d.get("flagged_truncated") else "false",
+]))
+PY
+}
+
+# cache_events <file> <since-epoch> -> TSV rows: ts, event_type, path, detail
+cache_events() {
+    python3 - "$1" "$2" <<'PY'
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+except Exception:
+    sys.exit(0)
+since = int(sys.argv[2])
+rows = [e for e in (d.get("recent_events") or [])
+        if str(e.get("ts", "")).isdigit() and int(e["ts"]) >= since]
+for e in sorted(rows, key=lambda r: int(r["ts"])):
+    print("\t".join(str(e.get(k) or "") for k in ("ts", "event_type", "path", "detail")))
+PY
+}
+
+# cache_flagged_paths <file> -> up to 50 flagged paths, sorted
+cache_flagged_paths() {
+    python3 - "$1" <<'PY'
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+except Exception:
+    sys.exit(0)
+for r in sorted(d.get("flagged_rows") or [], key=lambda r: r.get("path") or "")[:50]:
+    if r.get("path"):
+        print(r["path"])
+PY
+}
 since_disp="${since_str:0:16}"
 now_disp="${now_str:0:16}"
 
@@ -47,29 +106,52 @@ for i in $(seq 0 $((n_drives - 1))); do
         continue
     fi
 
-    if ! findmnt --target "$mp" --noheadings &>/dev/null; then
+    # --mountpoint, not --target: --target resolves *up* to the nearest
+    # enclosing mount, so an unmounted /mnt/primary answers with the SD card's
+    # root mount and the report cheerfully calls the drive mounted rw. That is
+    # the trap lib/guards.sh exists to catch, and a status report is the last
+    # place that should get it wrong.
+    if ! findmnt --mountpoint "$mp" --noheadings &>/dev/null; then
         drive_lines+="    ${name}: NOT MOUNTED (${mp})\n"
         anomalies+=("Drive '${name}' is not mounted at ${mp}")
         continue
     fi
 
-    opts=$(findmnt --target "$mp" --output OPTIONS --noheadings --first-only 2>/dev/null || echo "")
+    opts=$(findmnt --mountpoint "$mp" --output OPTIONS --noheadings --first-only 2>/dev/null || echo "")
     mode=$(echo "$opts" | grep -qw ro && echo "ro" || echo "rw")
     usage=$(df -h "$mp" 2>/dev/null | awk 'NR==2 {printf "%s / %s (%s)", $3, $2, $5}' || echo "—")
     drive_lines+="    ${name}: mounted ${mode}   ${usage}\n"
 done
 
 # ── Sync timer status ─────────────────────────────────────────────────────────
+# One group timer per distinct schedule, not one per job: #4 phase 2 replaced
+# the per-job timers with nase-sync-group-<slug>.timer and modules/sync/setup.sh
+# actively deletes the old ones. Checking the per-job names therefore reported
+# all nine as dead every week — the false alarm that opened #29. Derive the
+# group names the same way setup.sh and run-group.sh do, via schedule_slug, so
+# this cannot drift from them again.
 all_timers_ok=true
 timer_problem_lines=""
+declare -A _seen_slug=()
 n_jobs=$(config_len '.sync_jobs')
 for i in $(seq 0 $((n_jobs - 1))); do
-    job=$(config_idx '.sync_jobs' "$i" '.name')
-    state=$(systemctl is-active "nase-sync-${job}.timer" 2>/dev/null || echo "unknown")
+    schedule=$(config_idx '.sync_jobs' "$i" '.schedule')
+    [[ -n "$schedule" ]] || continue
+    slug=$(schedule_slug "$schedule")
+    [[ -z "${_seen_slug[$slug]+x}" ]] || continue
+    _seen_slug["$slug"]=1
+
+    unit="nase-sync-group-${slug}.timer"
+    # `systemctl is-active` prints the state and exits non-zero for anything
+    # that is not active, so the old `|| echo unknown` appended a second line
+    # to a perfectly good answer — which is why the report read "inactive"
+    # and "unknown" on consecutive lines.
+    state=$(systemctl is-active "$unit" 2>/dev/null) || true
+    [[ -n "$state" ]] || state="unknown"
     if [[ "$state" != "active" ]]; then
         all_timers_ok=false
-        timer_problem_lines+="    nase-sync-${job}.timer: ${state}\n"
-        anomalies+=("Sync timer 'nase-sync-${job}.timer' is ${state}")
+        timer_problem_lines+="    ${unit}: ${state}\n"
+        anomalies+=("Sync timer '${unit}' is ${state}")
     fi
 done
 
@@ -102,11 +184,24 @@ fi
 #         sorted by share then most-recent-first.
 ops_tsv=""
 EVENTS_LOG="${STAMP_DIR}/primary-events.log"
+# NASe's own config archive writes a fresh snapshot under this path on every
+# flush. It is NASe reporting its own bookkeeping back to the reader as though
+# it were user activity, and it was the single most frequent entry in the
+# report (#29). Anything under the configured archive destination is excluded.
+archive_dest=$(config_get '.config_archive.dest // ""')
+archive_dest="${archive_dest%/}"
 if [[ -f "$EVENTS_LOG" ]]; then
-    ops_tsv=$(awk -v since="$since_str" '
+    ops_tsv=$(awk -v since="$since_str" -v archive="$archive_dest" '
         BEGIN { FS = "\t" }
         $1 >= since {
             ts = $1; op = $2; path = $3
+            # Bookkeeping the watcher writes about itself, not file activity:
+            # __heartbeat__ proves the watcher is alive and __gap__ marks a
+            # restart. Both carry "-" as their path, so the path-based filters
+            # below never caught them and they surfaced in the report as
+            # changes to a share called "(root)".
+            if (op == "__heartbeat__" || op == "__gap__") next
+            if (archive != "" && (path == archive || index(path, archive "/") == 1)) next
             # .nase/ (the integrity manifest) and .trash/ are internal
             # churn, not user activity — record.sh and reconcile-primary.sh
             # already exclude them at the source, but old log entries can
@@ -168,20 +263,45 @@ if config_bool '.integrity.enabled' 2>/dev/null; then
         imp=$(config_idx   '.drives' "$i" '.mountpoint')
         iactive=$(config_idx '.drives' "$i" '.active')
         [[ "$iactive" != "false" ]] || continue
-        idb=$(integrity_db_path "$imp")
-        if [[ ! -f "$idb" ]]; then
+        # Read the SD-card cache, never the manifest on the drive. The DB is
+        # at <mountpoint>/.nase/integrity.db, and counting ~4M rows in it is a
+        # full table scan: doing that here woke both drives from standby every
+        # single run and held them up for the spindown timer afterwards —
+        # ~330k block requests on 2026-09-12, which is what sent #29 looking
+        # (see #4). integrity_write_status_cache writes everything below at
+        # the end of each integrity run, when the drive was awake anyway, and
+        # the web dashboard has always read it for exactly this reason.
+        icache=$(integrity_status_cache_path "$imp")
+        if [[ ! -f "$icache" ]]; then
+            integrity_section+="\n  ${iname} (${imp}): no manifest status recorded yet\n"
+            continue
+        fi
+        isummary=$(cache_summary "$icache") || isummary=""
+        if [[ -z "$isummary" ]]; then
+            integrity_section+="\n  ${iname} (${imp}): manifest status unreadable (${icache})\n"
+            anomalies+=("Integrity status cache for drive '${iname}' could not be read")
+            continue
+        fi
+        IFS=$'\t' read -r ihas itotal iok iflagged icomplete icursor idtotal \
+                          iupdated itruncated <<< "$isummary"
+        if [[ "$ihas" != "true" ]]; then
             integrity_section+="\n  ${iname} (${imp}): no manifest yet\n"
             continue
         fi
 
-        itotal=$(integrity_row_count "$idb")
-        iok=$(integrity_row_count "$idb" "ok")
-        iflagged=$(integrity_row_count "$idb" "flagged")
-        icomplete=$(integrity_meta_get "$idb" "discovery_complete")
-        icursor=$(integrity_meta_get "$idb" "discovery_cursor_n"); icursor="${icursor:-0}"
-        idtotal=$(integrity_meta_get "$idb" "discovery_total"); idtotal="${idtotal:-0}"
-
         integrity_section+="\n  ${iname} (${imp})\n"
+        # The figures are as fresh as the last integrity run, which only
+        # happens after a real rsync — so they can be days old. Say so rather
+        # than presenting a stale number as the current one.
+        if [[ -n "$iupdated" ]]; then
+            iage_d=$(( (now_ts - iupdated) / 86400 ))
+            iage_str=$(date -d "@${iupdated}" '+%Y-%m-%d %H:%M')
+            if [[ "$iage_d" -ge 1 ]]; then
+                integrity_section+="    as of ${iage_str} (${iage_d}d ago — updated when integrity last ran)\n"
+            else
+                integrity_section+="    as of ${iage_str}\n"
+            fi
+        fi
         integrity_section+="    files: ${itotal}   ok: ${iok}   flagged: ${iflagged}\n"
         if [[ "$icomplete" == "true" ]]; then
             integrity_section+="    discovery: complete\n"
@@ -189,8 +309,7 @@ if config_bool '.integrity.enabled' 2>/dev/null; then
             integrity_section+="    discovery: in progress (${icursor}/${idtotal})\n"
         fi
 
-        ievents=$(sqlite3 -separator $'\t' "$idb" \
-            "SELECT ts, event_type, path, detail FROM events WHERE ts >= ${since_ts} ORDER BY ts;" 2>/dev/null || true)
+        ievents=$(cache_events "$icache" "$since_ts")
         if [[ -n "$ievents" ]]; then
             integrity_section+="    checks since last report:\n"
             while IFS=$'\t' read -r ets etype epath edetail; do
@@ -208,7 +327,12 @@ if config_bool '.integrity.enabled' 2>/dev/null; then
             while IFS= read -r ifp; do
                 [[ -n "$ifp" ]] || continue
                 integrity_section+="      ${ifp}\n"
-            done < <(sqlite3 "$idb" "SELECT path FROM files WHERE status='flagged' ORDER BY path LIMIT 50;" 2>/dev/null)
+            done < <(cache_flagged_paths "$icache")
+            # flagged_rows is capped when writing the cache; say so rather
+            # than silently showing a short list as if it were the whole set.
+            if [[ "$itruncated" == "true" ]]; then
+                integrity_section+="      ... list truncated; run 'sudo nase integrity status ${iname}' for all\n"
+            fi
         fi
     done
 fi

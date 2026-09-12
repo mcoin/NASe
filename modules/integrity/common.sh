@@ -217,6 +217,19 @@ flagged AS (
   WHERE f.status = 'flagged'
   ORDER BY f.last_checked DESC
   LIMIT 200
+),
+-- Recent check events, so the status report can render its "checks since
+-- last report" section from this cache instead of opening the manifest on
+-- the drive (backlog #29). 35 days comfortably covers a weekly report even
+-- if one is missed; events only ever come into being during an integrity
+-- run, and this cache is rewritten at the end of every run, so nothing can
+-- occur in between that this snapshot would miss.
+recent AS (
+  SELECT ts, event_type, path, detail
+  FROM events
+  WHERE ts >= CAST(strftime('%s','now','-35 days') AS INTEGER)
+  ORDER BY ts DESC
+  LIMIT 200
 )
 SELECT json_object(
   'has_manifest',       json('true'),
@@ -226,6 +239,7 @@ SELECT json_object(
   'discovery_complete',  json(CASE WHEN (SELECT value FROM meta WHERE key='discovery_complete') = 'true'
                                 THEN 'true' ELSE 'false' END),
   'discovery_total',     (SELECT value FROM meta WHERE key='discovery_total'),
+  'discovery_cursor_n',  (SELECT value FROM meta WHERE key='discovery_cursor_n'),
   'flagged_truncated',   json(CASE WHEN (SELECT flagged_n FROM counts) > (SELECT COUNT(*) FROM flagged)
                                 THEN 'true' ELSE 'false' END),
   'updated_at',          CAST(strftime('%s','now') AS INTEGER),
@@ -233,7 +247,11 @@ SELECT json_object(
                              'path', path, 'last_checked', last_checked,
                              'event_type', COALESCE(event_type, 'unknown'),
                              'detail', COALESCE(detail, '')
-                           )) FROM flagged)
+                           )) FROM flagged),
+  'recent_events',       (SELECT json_group_array(json_object(
+                             'ts', ts, 'event_type', event_type,
+                             'path', path, 'detail', COALESCE(detail, '')
+                           )) FROM recent)
 );
 SQL
     then
