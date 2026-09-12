@@ -298,10 +298,10 @@ YAML
 rm -f "${SYSTEMD_OUT}"/nase-sync-*.service "${SYSTEMD_OUT}"/nase-sync-*.timer
 if run_setup 2>/dev/null; then
     echo "  FAIL  slug collision is rejected"
-    TESTS_FAIL=$((TESTS_FAIL + 1))
+    tests_record fail
 else
     echo "  PASS  slug collision is rejected"
-    TESTS_PASS=$((TESTS_PASS + 1))
+    tests_record pass
 fi
 
 test_summary

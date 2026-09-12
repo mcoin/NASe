@@ -33,21 +33,45 @@ export NAS_LOG="${NAS_LOG:-${NASE_TEST_SCRATCH}/nase.log}"
 export NASE_STAMP_DIR="${NASE_STAMP_DIR:-${NASE_TEST_SCRATCH}/varlib}"
 mkdir -p "$(dirname "$NAS_LOG")" "$NASE_STAMP_DIR" 2>/dev/null || true
 
-TESTS_PASS=0
-TESTS_FAIL=0
-TESTS_SKIP=0
+# ── Counters (backlog #38) ───────────────────────────────────────────────────
+# File-backed, not shell variables. A `( ... )` subshell gets its own copy of a
+# variable, so an assertion inside one used to print FAIL and then be forgotten
+# — test-integrity.sh ran 34 assertions, counted 17, and exited 0 no matter
+# what the other 17 did. Subshells are used deliberately there to isolate
+# sourced state, so the harness is the right place to fix this rather than
+# banning the pattern.
+#
+# $$ is the invoking shell's PID and stays constant inside a subshell, so every
+# subshell of a suite appends to the same files. Cleared on source because PIDs
+# are reused, and a stale directory would otherwise seed the next run's totals.
+_TESTS_COUNT_DIR="${NASE_TEST_SCRATCH}/counters.$$"
+rm -rf "$_TESTS_COUNT_DIR"
+mkdir -p "$_TESTS_COUNT_DIR"
+export _TESTS_COUNT_DIR
+
+# tests_record pass|fail|skip
+# Record one result. Use this instead of touching a counter directly: a
+# variable increment is invisible to the parent shell from inside a subshell.
+tests_record() {
+    printf 'x\n' >> "${_TESTS_COUNT_DIR}/$1"
+}
+
+_tests_total() {
+    local f="${_TESTS_COUNT_DIR}/$1"
+    if [[ -f "$f" ]]; then wc -l < "$f"; else echo 0; fi
+}
 
 # assert_eq DESCRIPTION EXPECTED ACTUAL
 assert_eq() {
     local desc="$1" expected="$2" actual="$3"
     if [[ "$actual" == "$expected" ]]; then
         echo "  PASS  $desc"
-        (( TESTS_PASS++ )) || true
+        tests_record pass
     else
         echo "  FAIL  $desc"
         echo "        expected: $(printf '%q' "$expected")"
         echo "        got:      $(printf '%q' "$actual")"
-        (( TESTS_FAIL++ )) || true
+        tests_record fail
     fi
 }
 
@@ -63,10 +87,10 @@ assert_exit0() {
     local desc="$1"; shift
     if "$@" &>/dev/null; then
         echo "  PASS  $desc"
-        (( TESTS_PASS++ )) || true
+        tests_record pass
     else
         echo "  FAIL  $desc (expected exit 0, got $?)"
-        (( TESTS_FAIL++ )) || true
+        tests_record fail
     fi
 }
 
@@ -76,10 +100,10 @@ assert_exit1() {
     local desc="$1"; shift
     if ! "$@" &>/dev/null; then
         echo "  PASS  $desc"
-        (( TESTS_PASS++ )) || true
+        tests_record pass
     else
         echo "  FAIL  $desc (expected non-zero exit, got 0)"
-        (( TESTS_FAIL++ )) || true
+        tests_record fail
     fi
 }
 
@@ -88,10 +112,10 @@ assert_file_exists() {
     local desc="$1" path="$2"
     if [[ -f "$path" ]]; then
         echo "  PASS  $desc"
-        (( TESTS_PASS++ )) || true
+        tests_record pass
     else
         echo "  FAIL  $desc — file not found: $path"
-        (( TESTS_FAIL++ )) || true
+        tests_record fail
     fi
 }
 
@@ -100,10 +124,10 @@ assert_file_absent() {
     local desc="$1" path="$2"
     if [[ ! -f "$path" ]]; then
         echo "  PASS  $desc"
-        (( TESTS_PASS++ )) || true
+        tests_record pass
     else
         echo "  FAIL  $desc — unexpected file: $path"
-        (( TESTS_FAIL++ )) || true
+        tests_record fail
     fi
 }
 
@@ -112,10 +136,10 @@ assert_dir_absent() {
     local desc="$1" path="$2"
     if [[ ! -d "$path" ]]; then
         echo "  PASS  $desc"
-        (( TESTS_PASS++ )) || true
+        tests_record pass
     else
         echo "  FAIL  $desc — unexpected directory: $path"
-        (( TESTS_FAIL++ )) || true
+        tests_record fail
     fi
 }
 
@@ -124,12 +148,12 @@ assert_contains() {
     local desc="$1" needle="$2" haystack="$3"
     if [[ "$haystack" == *"$needle"* ]]; then
         echo "  PASS  $desc"
-        (( TESTS_PASS++ )) || true
+        tests_record pass
     else
         echo "  FAIL  $desc"
         echo "        expected to contain: $(printf '%q' "$needle")"
         echo "        got: $(printf '%q' "$haystack")"
-        (( TESTS_FAIL++ )) || true
+        tests_record fail
     fi
 }
 
@@ -138,24 +162,26 @@ assert_not_contains() {
     local desc="$1" needle="$2" haystack="$3"
     if [[ "$haystack" != *"$needle"* ]]; then
         echo "  PASS  $desc"
-        (( TESTS_PASS++ )) || true
+        tests_record pass
     else
         echo "  FAIL  $desc"
         echo "        expected NOT to contain: $(printf '%q' "$needle")"
-        (( TESTS_FAIL++ )) || true
+        tests_record fail
     fi
 }
 
 # skip DESCRIPTION REASON
 skip() {
     echo "  SKIP  $1 ($2)"
-    (( TESTS_SKIP++ )) || true
+    tests_record skip
 }
 
 # test_summary
 # Print totals and exit 1 if any failures.
 test_summary() {
+    local p f s
+    p=$(_tests_total pass); f=$(_tests_total fail); s=$(_tests_total skip)
     echo ""
-    echo "  ${TESTS_PASS} passed  ${TESTS_FAIL} failed  ${TESTS_SKIP} skipped"
-    [[ $TESTS_FAIL -eq 0 ]] || exit 1
+    echo "  ${p} passed  ${f} failed  ${s} skipped"
+    [[ "$f" -eq 0 ]] || exit 1
 }

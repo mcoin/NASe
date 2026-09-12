@@ -117,10 +117,10 @@ assert_trashed() {
     found=$(find "$TRASH" -name "$fname" | head -1)
     if [[ -n "$found" ]]; then
         echo "  PASS  $desc"
-        (( TESTS_PASS++ )) || true
+        tests_record pass
     else
         echo "  FAIL  $desc — '$fname' not found anywhere under $TRASH"
-        (( TESTS_FAIL++ )) || true
+        tests_record fail
     fi
 }
 

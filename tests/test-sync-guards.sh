@@ -117,8 +117,8 @@ else
     age=$(( ( $(date +%s) - $(_stamp_mtime "$STAMP") ) / 86400 ))
 fi
 [[ $age -ge 7 ]] \
-    && { echo "  PASS  8-day-old stamp: age >= 7 days (got ${age})"; (( TESTS_PASS++ )) || true; } \
-    || { echo "  FAIL  8-day-old stamp: expected age >= 7, got ${age}"; (( TESTS_FAIL++ )) || true; }
+    && { echo "  PASS  8-day-old stamp: age >= 7 days (got ${age})"; tests_record pass; } \
+    || { echo "  FAIL  8-day-old stamp: expected age >= 7, got ${age}"; tests_record fail; }
 
 # Negative age guard: if stamp_mtime is in the future (clock skew), age must not go negative
 stamp_mtime=$(( $(date +%s) + 3600 ))  # 1 hour in the future

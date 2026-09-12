@@ -26,10 +26,10 @@ assert_matches() {
     local spec="$1" day="$2"
     if calendar_matches_day "$spec" "$day"; then
         echo "  PASS  '$spec' fires on $day"
-        (( TESTS_PASS++ )) || true
+        tests_record pass
     else
         echo "  FAIL  '$spec' should fire on $day but did not"
-        (( TESTS_FAIL++ )) || true
+        tests_record fail
     fi
 }
 
@@ -38,10 +38,10 @@ assert_no_match() {
     local spec="$1" day="$2"
     if calendar_matches_day "$spec" "$day"; then
         echo "  FAIL  '$spec' should not fire on $day but did"
-        (( TESTS_FAIL++ )) || true
+        tests_record fail
     else
         echo "  PASS  '$spec' does not fire on $day"
-        (( TESTS_PASS++ )) || true
+        tests_record pass
     fi
 }
 
@@ -87,26 +87,26 @@ assert_no_match ""         2026-08-13
 
 if calendar_spec_valid "Thu"; then
     echo "  PASS  calendar_spec_valid accepts 'Thu'"
-    (( TESTS_PASS++ )) || true
+    tests_record pass
 else
     echo "  FAIL  calendar_spec_valid rejected 'Thu'"
-    (( TESTS_FAIL++ )) || true
+    tests_record fail
 fi
 
 if calendar_spec_valid "Thu *-*-1..7 03:00:00"; then
     echo "  PASS  calendar_spec_valid accepts a monthly spec"
-    (( TESTS_PASS++ )) || true
+    tests_record pass
 else
     echo "  FAIL  calendar_spec_valid rejected a monthly spec"
-    (( TESTS_FAIL++ )) || true
+    tests_record fail
 fi
 
 if calendar_spec_valid "Thurs-day"; then
     echo "  FAIL  calendar_spec_valid accepted a typo'd spec"
-    (( TESTS_FAIL++ )) || true
+    tests_record fail
 else
     echo "  PASS  calendar_spec_valid rejects a typo'd spec"
-    (( TESTS_PASS++ )) || true
+    tests_record pass
 fi
 
 test_summary
