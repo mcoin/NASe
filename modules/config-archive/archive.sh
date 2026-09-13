@@ -23,6 +23,7 @@ REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 source "${REPO_ROOT}/lib/log.sh"
 source "${REPO_ROOT}/lib/config.sh"
 source "${REPO_ROOT}/lib/calendar.sh"
+source "${REPO_ROOT}/lib/guards.sh"
 
 log_section "Config archive"
 
@@ -153,12 +154,30 @@ fi
 log_info "Flushing to '${DEST}': ${reason}."
 
 # ── Only now does anything touch the destination drive ───────────────────────
-dest_check="$DEST"
-while [[ -n "$dest_check" && "$dest_check" != "/" && ! -e "$dest_check" ]]; do
-    dest_check="$(dirname "$dest_check")"
+# The drive's mountpoint, not the destination directory: the archive writes
+# several levels below it and those levels do not exist until the first flush.
+# Asking about the mountpoint itself is the only question with a stable answer.
+#
+# This used to walk up from $DEST to the first existing path and ask
+# `findmnt --target` about that. With the drive absent, the walk ended at a
+# directory on the SD card and --target resolved up to the root mount, so the
+# guard passed and the archive wrote its snapshots to the SD card under
+# /mnt/primary/... — invisible once the drive mounted over them, and logged as
+# a success. See backlog #33 and is_mounted_at in lib/guards.sh.
+dest_mountpoint=""
+n_drv=$(config_len '.drives')
+for i in $(seq 0 $((n_drv - 1))); do
+    _mp=$(config_idx '.drives' "$i" '.mountpoint')
+    [[ -n "$_mp" && "$DEST" == "${_mp%/}"/* ]] || continue
+    dest_mountpoint="${_mp%/}"
+    break
 done
-if ! findmnt --target "$dest_check" --noheadings &>/dev/null; then
-    log_info "Destination '${DEST}': drive not mounted — skipping (change stays pending)."
+if [[ -z "$dest_mountpoint" ]]; then
+    log_warn "Destination '${DEST}' is not under any configured drive mountpoint — skipping."
+    exit 0
+fi
+if ! is_mounted_at "$dest_mountpoint"; then
+    log_info "Destination '${DEST}': drive not mounted at ${dest_mountpoint} — skipping (change stays pending)."
     exit 0
 fi
 

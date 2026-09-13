@@ -32,7 +32,10 @@ of *backup_daily* look like a successful fix to *primary*. Resolve drives by
 UUID (as `config.yaml` and every module do), or by USB `vid:pid`.
 
 `config.yaml` is authoritative for drive names and mountpoints; the above is
-what it currently declares. Note that `/mnt/backup1` and `/mnt/backup2` are
+what it currently declares. Replacing a drive, or promoting a backup to stand
+in for the primary, is written up in `DRIVE_REPLACEMENT.md` — the short version
+is that `uuid` is the only field tying a config entry to a physical disk, so a
+swap is a one-field change and everything addressed by path keeps working. Note that `/mnt/backup1` and `/mnt/backup2` are
 *stale directories on the SD card* left over from an earlier layout, not
 mountpoints. `findmnt --target /mnt/backup1` therefore resolves up to the root
 device — which is exactly the trap `lib/guards.sh` (`is_safe_mount_path`)

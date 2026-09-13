@@ -54,7 +54,45 @@ notifications:
 YAML
 }
 
+# findmnt stub. archive.sh asks is_mounted_at (lib/guards.sh) whether the
+# drive is really mounted at its configured mountpoint before writing anything,
+# and $WORK is a temp directory rather than a mount — so without this the guard
+# correctly refuses and every archive test fails.
+#
+# Worth noting why this stub did not exist before: the guard used to be spelled
+# `findmnt --target`, which resolves up to the enclosing mount and so returned
+# success for any path that exists. The suite passed because the guard never
+# fired, not because it was satisfied. See backlog #33.
+STUBS="${WORK}/bin"
+mkdir -p "$STUBS"
+cat > "${STUBS}/findmnt" <<'STUB'
+#!/usr/bin/env bash
+path=""; want_opts=false; exact=false
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --mountpoint) exact=true; path="$2"; shift 2 ;;
+        --target)     path="$2"; shift 2 ;;
+        --output)     [[ "$2" == "OPTIONS" ]] && want_opts=true; shift 2 ;;
+        *) shift ;;
+    esac
+done
+if [[ " ${MOUNTED_PATHS:-} " == *" $path "* ]]; then
+    $want_opts && echo "rw,noatime" || echo "$path"
+    exit 0
+fi
+# --target resolves up; --mountpoint does not. Preserving the distinction keeps
+# the stub honest about what the real tool would answer.
+if [[ "$exact" == "false" ]]; then
+    $want_opts && echo "rw,relatime" || echo "/"
+    exit 0
+fi
+exit 1
+STUB
+chmod +x "${STUBS}/findmnt"
+
 run_archive() {
+    PATH="${STUBS}:${PATH}"              \
+    MOUNTED_PATHS="${MOUNTED_PATHS-$WORK}" \
     CONFIG_FILE="$TEST_CFG"              \
     NASE_STAMP_DIR="$STAMPS"             \
     NASE_BACKLOG_FILE="$BACKLOG"         \
@@ -202,5 +240,30 @@ rm "$ATTACHMENTS/7/2-def.png"
 run_archive
 assert_file_absent "attachments: deletion propagates to the latest copy" \
     "$DEST/backlog-attachments/7/2-def.png"
+
+# ── The drive must really be mounted before anything is written (#33) ─────────
+# The old guard used `findmnt --target`, which resolves up to the enclosing
+# mount, so with the drive absent it found the SD card's root mount, passed,
+# and the archive wrote its snapshots to /mnt/primary/... on the SD card —
+# where they became invisible the moment the real drive mounted over them, and
+# were logged as a success.
+reset
+echo "changed for the absent-drive check" >> "$BACKLOG"
+MOUNTED_PATHS=""   # nothing is mounted anywhere
+run_archive
+assert_contains "absent drive: says the drive is not mounted" \
+    "not mounted" "$(cat "$LOGS/last.log")"
+assert_not_contains "absent drive: does not claim to have archived" \
+    "Archived" "$(cat "$LOGS/last.log")"
+assert_eq "absent drive: nothing written under the mountpoint" "0" \
+    "$(find "$DEST" -type f 2>/dev/null | wc -l)"
+assert_file_exists "absent drive: the change stays pending" \
+    "${STAMPS}/config-archive-pending.stamp"
+
+# And once the drive is back, the pending change is flushed as normal.
+MOUNTED_PATHS="$WORK"
+run_archive
+assert_contains "drive back: flushes the change that was held" \
+    "Archived" "$(cat "$LOGS/last.log")"
 
 test_summary

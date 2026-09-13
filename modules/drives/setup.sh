@@ -101,7 +101,23 @@ for i in $(seq 0 $((n - 1))); do
     unit_base=$(systemd-escape --path "$mountpoint")
     unit_file="${SYSTEMD_DIR}/${unit_base}.mount"
 
-    # Generate the mount unit
+    # Generate the mount unit.
+    #
+    # x-systemd.device-timeout used to be in Options= here, set to 10s, and it
+    # never did anything: systemd.mount(5) says it "can only be used in
+    # /etc/fstab, and will be ignored when part of the Options= setting in a
+    # unit file". The real wait for an absent drive is systemd's default device
+    # job timeout — 90s, which is what the three driveless boots of 2026-09-06
+    # actually recorded before the mounts failed with result 'dependency'.
+    # Removed rather than left reading as if a 10s timeout were configured
+    # (backlog #33). Shortening the real timeout is a separate decision: it
+    # means reaching the .device unit's JobTimeoutSec, and it cannot be
+    # verified without a reboot.
+    #
+    # nofail is kept. Its effect inside a unit file is less clear-cut than
+    # device-timeout's — systemd.mount(5) describes it suppressing the
+    # automatic Before=local-fs.target — so removing it could change boot
+    # ordering, which is not worth risking for tidiness.
     unit_content="# Managed by NASe — do not edit manually. Re-run apply.sh instead.
 [Unit]
 Description=NASe mount: ${name} (${mountpoint})
@@ -112,7 +128,7 @@ Before=multi-user.target
 What=/dev/disk/by-uuid/${uuid}
 Where=${mountpoint}
 Type=${filesystem}
-Options=${read_only:+ro,}defaults,nofail,noatime,x-systemd.device-timeout=10s
+Options=${read_only:+ro,}defaults,nofail,noatime
 
 [Install]
 WantedBy=multi-user.target"

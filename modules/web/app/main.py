@@ -191,10 +191,17 @@ def drive_info(drive: dict) -> dict:
     mp = drive.get("mountpoint", "")
     if drive.get("active") is False:
         return {"status": "inactive", "mode": None, "usage": None}
-    r = _run("findmnt", "--target", mp, "--noheadings")
+    # --mountpoint, not --target. --target resolves *up* to the nearest
+    # enclosing mount, so with the drive absent it finds the SD card's root
+    # mount, succeeds, and the "not mounted" branch below becomes unreachable.
+    # The page then showed the drive as mounted rw with the SD card's df
+    # figures — roughly 14 GB where 5.5 TB is expected — which is worse than
+    # showing nothing, because it states positively that the drive is fine.
+    # The shell side of this is is_mounted_at in lib/guards.sh (backlog #33).
+    r = _run("findmnt", "--mountpoint", mp, "--noheadings")
     if r.returncode != 0 or not r.stdout.strip():
         return {"status": "not mounted", "mode": None, "usage": None}
-    r_opts = _run("findmnt", "--target", mp,
+    r_opts = _run("findmnt", "--mountpoint", mp,
                   "--output", "OPTIONS", "--noheadings", "--first-only")
     if r_opts.returncode != 0:
         return {"status": "not mounted", "mode": None, "usage": None}

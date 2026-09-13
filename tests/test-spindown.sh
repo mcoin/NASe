@@ -214,4 +214,18 @@ assert_file_exists "while the live state directory is left alone" \
     "/var/lib/nase/spin-state/primary.state"
 rm -rf "$SPIN_WORK"
 
+# ── mount unit options (#33) ──────────────────────────────────────────────────
+# x-systemd.device-timeout is documented (systemd.mount(5)) as usable only in
+# /etc/fstab and ignored inside a unit file's Options=. It sat here set to 10s
+# while the real wait for an absent drive was systemd's 90s default, which is
+# what the driveless boots of 2026-09-06 recorded. Removed so the unit stops
+# claiming a timeout it never had.
+# The generated directive itself, not the comment above it explaining why.
+UNIT_SRC=$(grep -E '^Options=' "${REPO_ROOT}/modules/drives/setup.sh")
+assert_contains "the template has an Options= line at all" "noatime" "$UNIT_SRC"
+assert_not_contains "mount unit does not set an ignored device-timeout" \
+    "x-systemd.device-timeout" "$UNIT_SRC"
+# nofail is deliberately kept — see the comment above the template.
+assert_contains "mount unit still sets nofail" "nofail" "$UNIT_SRC"
+
 test_summary

@@ -52,7 +52,7 @@ if ! config_bool '.integrity.enabled' 2>/dev/null; then
     exit 0
 fi
 
-if findmnt --target "$MOUNTPOINT" --output OPTIONS --noheadings --first-only 2>/dev/null | grep -qw ro; then
+if findmnt --mountpoint "$MOUNTPOINT" --output OPTIONS --noheadings --first-only 2>/dev/null | grep -qw ro; then
     log_info "Integrity bootstrap: ${MOUNTPOINT} is mounted read-only — remounting rw for the duration."
     mount -o remount,rw "$MOUNTPOINT" \
         || { log_error "Cannot remount ${MOUNTPOINT} rw — aborting."; exit 1; }

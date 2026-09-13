@@ -14,6 +14,7 @@ set -euo pipefail
 REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 source "${REPO_ROOT}/lib/log.sh"
 source "${REPO_ROOT}/lib/config.sh"
+source "${REPO_ROOT}/lib/guards.sh"
 source "${REPO_ROOT}/modules/integrity/common.sh"
 
 if ! config_bool '.integrity.enabled' 2>/dev/null; then
@@ -32,7 +33,12 @@ for i in $(seq 0 $((n - 1))); do
     mountpoint=$(config_idx '.drives' "$i" '.mountpoint')
     read_only=$(config_idx '.drives' "$i" '.read_only')
 
-    if ! findmnt --target "$mountpoint" --noheadings &>/dev/null; then
+    # is_mounted_at, not `findmnt --target`: the latter resolves up to the SD
+    # card's root mount for an absent drive, so this guard never fired and the
+    # block below created .nase/ and a manifest on the SD card instead — with
+    # meta.drive_uuid recording the SD card's UUID, since integrity_live_uuid
+    # resolves the same way. See backlog #33.
+    if ! is_mounted_at "$mountpoint"; then
         log_info "  Drive '${name}': not mounted — skipping."
         continue
     fi
@@ -40,8 +46,7 @@ for i in $(seq 0 $((n - 1))); do
     nase_dir="${mountpoint%/}/.nase"
     db=$(integrity_db_path "$mountpoint")
 
-    is_ro=$(findmnt --target "$mountpoint" --output OPTIONS --noheadings --first-only \
-        | grep -qw ro && echo true || echo false)
+    is_ro=$(is_mounted_ro_at "$mountpoint" && echo true || echo false)
 
     # WAL needs to create a -shm file even for plain reads, which fails on a
     # filesystem mounted read-only. Backup drives spend most of their life

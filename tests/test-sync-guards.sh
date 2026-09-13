@@ -126,4 +126,75 @@ raw_age=$(( ( $(date +%s) - stamp_mtime ) / 86400 ))
 [[ $raw_age -lt 0 ]] && guarded_age=0 || guarded_age=$raw_age
 assert_eq "clock skew: negative age clamped to 0" "0" "$guarded_age"
 
+
+
+# ── is_mounted_at / mount_options_at (#33) ────────────────────────────────────
+# The trap these exist for: `findmnt --target PATH` resolves *up* to the
+# nearest enclosing mount, so for an unmounted /mnt/primary it finds the root
+# filesystem, exits 0, and reports the drive as present. Guards written that
+# way never fire, and callers then read or write the mountpoint directory on
+# the SD card believing it is the drive.
+GW=$(mktemp -d /tmp/nase-test-guards-mp.XXXXXX)
+mkdir -p "${GW}/bin" "${GW}/mnt/absent"
+
+# findmnt stub with the real tool's distinction: --target answers about the
+# enclosing mount, --mountpoint only about an exact one.
+cat > "${GW}/bin/findmnt" <<'STUB'
+#!/usr/bin/env bash
+mode="" path="" want_opts=false
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --target)     mode=target;     path="$2"; shift 2 ;;
+        --mountpoint) mode=mountpoint; path="$2"; shift 2 ;;
+        --output)     [[ "$2" == "OPTIONS" ]] && want_opts=true; shift 2 ;;
+        *) shift ;;
+    esac
+done
+# MOUNTED_PATHS lists exact mountpoints; MOUNT_OPTS gives the options for them.
+if [[ " ${MOUNTED_PATHS:-} " == *" $path "* ]]; then
+    $want_opts && echo "${MOUNT_OPTS:-rw,noatime}" || echo "$path"
+    exit 0
+fi
+# Not an exact mountpoint: --target still succeeds by resolving up to "/",
+# which is precisely the behaviour the helpers must not rely on.
+if [[ "$mode" == "target" ]]; then
+    $want_opts && echo "rw,relatime" || echo "/"
+    exit 0
+fi
+exit 1
+STUB
+chmod +x "${GW}/bin/findmnt"
+export PATH="${GW}/bin:${PATH}"
+source "${REPO_ROOT}/lib/guards.sh"
+
+# Assert the helpers exist before testing them. assert_exit1 cannot tell a
+# function that correctly returned 1 from one that does not exist and returned
+# 127, so without this a rename would show up as three passing tests.
+for fn in is_mounted_at mount_options_at is_mounted_ro_at; do
+    assert_exit0 "lib/guards.sh defines ${fn}" declare -F "$fn"
+done
+
+export MOUNTED_PATHS="/mnt/present"
+assert_exit0 "is_mounted_at: true for a real mountpoint"      is_mounted_at /mnt/present
+assert_exit1 "is_mounted_at: false for an unmounted dir"      is_mounted_at /mnt/absent
+assert_exit1 "is_mounted_at: false for a path below a mount"  is_mounted_at /mnt/present/sub
+
+# The regression in one line: the old spelling says yes to all three.
+assert_eq "the old --target spelling cannot tell them apart" "yes yes yes" \
+    "$(for p in /mnt/present /mnt/absent /mnt/present/sub; do
+          findmnt --target "$p" --noheadings &>/dev/null && printf 'yes ' || printf 'no '
+       done | sed 's/ $//')"
+
+export MOUNT_OPTS="ro,noatime"
+assert_exit0 "is_mounted_ro_at: true for a ro mount"  is_mounted_ro_at /mnt/present
+export MOUNT_OPTS="rw,noatime"
+assert_exit1 "is_mounted_ro_at: false for a rw mount" is_mounted_ro_at /mnt/present
+# The important one: an absent drive must not read as writable just because
+# the root filesystem it resolves up to happens to be rw.
+assert_exit1 "is_mounted_ro_at: false (not rw) for an absent drive" is_mounted_ro_at /mnt/absent
+assert_empty "mount_options_at: empty for an absent drive" "$(mount_options_at /mnt/absent)"
+
+rm -rf "$GW"
+
+
 test_summary

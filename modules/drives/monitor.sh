@@ -9,6 +9,7 @@ source "${REPO_ROOT}/lib/log.sh"
 source "${REPO_ROOT}/lib/config.sh"
 
 failures=()
+missing=()
 
 n=$(config_len '.drives')
 for i in $(seq 0 $((n - 1))); do
@@ -24,6 +25,7 @@ for i in $(seq 0 $((n - 1))); do
     dev_symlink="/dev/disk/by-uuid/${uuid}"
     if [[ ! -e "$dev_symlink" ]]; then
         log_warn "Drive '${name}' (UUID ${uuid}) not present — skipping SMART check."
+        missing+=("${name} (UUID ${uuid})")
         continue
     fi
 
@@ -61,6 +63,21 @@ for i in $(seq 0 $((n - 1))); do
         log_warn "  Output: ${smart_output}"
     fi
 done
+
+# A drive that never appeared is reported too, and separately from a SMART
+# failure — it is a different fault with a different fix. This used to be a
+# WARN in the log and nothing else, so three consecutive boots with both
+# drives absent (2026-09-06) sent not one notification while Samba served
+# nothing and every sync silently skipped. See backlog #33.
+if [[ ${#missing[@]} -gt 0 ]]; then
+    message="Drive(s) not present on $(hostname):"$'\n'
+    for m in "${missing[@]}"; do
+        message+="  - ${m}"$'\n'
+    done
+    message+=$'\n'"The drive is configured and active but its /dev/disk/by-uuid entry does not exist, so it never appeared to the system. Shares and backups that depend on it are not working. Check the USB connection and 'sudo nase drives'."
+    log_error "$message"
+    printf '%s' "$message" | "${REPO_ROOT}/modules/sync/notify.sh" "Drive not present on $(hostname)" || true
+fi
 
 if [[ ${#failures[@]} -gt 0 ]]; then
     message="SMART health failures detected on $(hostname):"$'\n'

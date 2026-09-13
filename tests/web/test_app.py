@@ -1519,3 +1519,74 @@ def test_the_repos_own_config_round_trips_byte_identically(monkeypatch, tmp_path
     m._reanchor_item_comments(doc)
     buf = io.StringIO(); ry.dump(doc, buf)
     assert buf.getvalue() == src
+
+
+# ── A missing drive must not read as mounted (#33) ─────────────────────────────
+
+def _findmnt_fake(mounted_at):
+    """Stand in for _run, with the real findmnt's distinction: --target
+    resolves up to an enclosing mount, --mountpoint matches only exactly."""
+    import subprocess
+    def fake(*args):
+        argv = list(args)
+        if argv[0] == "df":
+            # df on an unmounted path reports the filesystem above it — the
+            # SD card — which is how the wrong capacity reached the page.
+            return subprocess.CompletedProcess(argv, 0, "Filesystem Size Used Avail Use%\n"
+                                                        "/dev/root 14G 3G 11G 25%\n", "")
+        if argv[0] != "findmnt":
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        path = argv[argv.index("--mountpoint") + 1] if "--mountpoint" in argv else \
+               argv[argv.index("--target") + 1]
+        exact = path in mounted_at
+        if exact:
+            out = "rw,noatime" if "OPTIONS" in argv else path
+            return subprocess.CompletedProcess(argv, 0, out, "")
+        if "--target" in argv:          # resolves up to the root mount
+            out = "rw,relatime" if "OPTIONS" in argv else "/"
+            return subprocess.CompletedProcess(argv, 0, out, "")
+        return subprocess.CompletedProcess(argv, 1, "", "")
+    return fake
+
+
+def test_absent_drive_reports_not_mounted(monkeypatch):
+    """The bug: drive_info asked `findmnt --target`, which succeeds against the
+    SD card's root mount, so the "not mounted" branch was unreachable and the
+    page showed a missing 5.5 TB drive as mounted rw with ~14 GB of capacity."""
+    import modules.web.app.main as m
+    monkeypatch.setattr(m, "_run", _findmnt_fake({"/mnt/backup_daily"}))
+    info = m.drive_info({"mountpoint": "/mnt/primary", "active": True})
+    assert info["status"] == "not mounted"
+    assert info["usage"] is None
+    assert info["mode"] is None
+
+
+def test_present_drive_still_reports_mounted(monkeypatch):
+    import modules.web.app.main as m
+    monkeypatch.setattr(m, "_run", _findmnt_fake({"/mnt/primary"}))
+    info = m.drive_info({"mountpoint": "/mnt/primary", "active": True})
+    assert info["status"] == "mounted"
+    assert info["mode"] == "rw"
+    assert info["usage"] == "3G / 14G (25%)"
+
+
+def test_inactive_drive_is_unchanged(monkeypatch):
+    import modules.web.app.main as m
+    monkeypatch.setattr(m, "_run", _findmnt_fake(set()))
+    assert m.drive_info({"mountpoint": "/mnt/x", "active": False})["status"] == "inactive"
+
+
+def test_drive_info_never_asks_findmnt_target(monkeypatch):
+    """Belt and braces: --target cannot answer "is this mounted", so it must
+    not be how the dashboard asks. Pins the fix against a later edit."""
+    import subprocess
+    import modules.web.app.main as m
+    seen = []
+    def spy(*args):
+        seen.append(list(args))
+        return subprocess.CompletedProcess(list(args), 1, "", "")
+    monkeypatch.setattr(m, "_run", spy)
+    m.drive_info({"mountpoint": "/mnt/primary", "active": True})
+    findmnt_calls = [a for a in seen if a and a[0] == "findmnt"]
+    assert findmnt_calls, "drive_info should consult findmnt"
+    assert not any("--target" in a for a in findmnt_calls)

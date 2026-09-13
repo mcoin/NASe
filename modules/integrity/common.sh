@@ -53,9 +53,15 @@ integrity_meta_set() {
 }
 
 # integrity_live_uuid MOUNTPOINT
-# The UUID of the block device currently mounted at MOUNTPOINT, or empty.
+# The UUID of the block device mounted exactly at MOUNTPOINT, or empty.
+#
+# --mountpoint, not --target (backlog #33). With the drive absent, --target
+# resolves up to the SD card's root mount and returns *its* UUID, which would
+# be recorded into a manifest's meta.drive_uuid as though it were the drive's,
+# and would satisfy integrity_check_uuid afterwards. Empty is the honest
+# answer here, and every caller already treats empty as "do not write".
 integrity_live_uuid() {
-    findmnt --target "$1" --output UUID --noheadings --first-only 2>/dev/null || true
+    findmnt --mountpoint "$1" --output UUID --noheadings --first-only 2>/dev/null || true
 }
 
 # integrity_check_uuid MOUNTPOINT DB
