@@ -35,6 +35,12 @@ LOG_DIR     = Path("/var/log/nase")
 CENTRAL_LOG = LOG_DIR / "nase.log"
 EVENTS_LOG  = Path(os.environ.get("NASE_EVENTS_LOG", str(STAMP_DIR / "primary-events.log")))
 SPIN_HISTORY_LOG = STAMP_DIR / "spin-history.log"
+# Archived status reports, one <generated_at>.json per report, written by
+# modules/status-report/write_report.py. Always read from here, never from the
+# copy config-archive puts on the drive — serving that would spin both drives
+# up on every page view, which is the mistake #29 removed from the report
+# generator itself (backlog #37).
+REPORTS_DIR = Path(os.environ.get("NASE_REPORTS_DIR", str(STAMP_DIR / "reports")))
 BACKLOG_FILE = Path(os.environ.get("NASE_BACKLOG_FILE", str(STAMP_DIR / "backlog.json")))
 
 _CHANGES_PAGE_SIZE = 20
@@ -1334,6 +1340,76 @@ async def save_config_section(request: Request, section: str):
                                       {"success": True, "message": ""})
 
 # ── Backlog routes ───────────────────────────────────────────────────────────────
+# ── Status reports (backlog #37) ───────────────────────────────────────────────
+def load_reports() -> list[dict]:
+    """Every archived report, newest first.
+
+    A file that will not parse is skipped rather than allowed to break the
+    page: this directory is written by a shell script and copied to the drive
+    by another one, so one unreadable entry should cost that entry and nothing
+    more."""
+    out: list[dict] = []
+    try:
+        entries = sorted(REPORTS_DIR.glob("*.json"))
+    except OSError:
+        return out
+    for f in entries:
+        try:
+            record = json.loads(f.read_text())
+        except (OSError, ValueError):
+            continue
+        if not isinstance(record, dict) or "generated_at" not in record:
+            continue
+        try:
+            record["generated_at"] = int(record["generated_at"])
+        except (TypeError, ValueError):
+            continue
+        out.append(record)
+    out.sort(key=lambda r: r["generated_at"], reverse=True)
+    return out
+
+
+def _report_view(record: dict) -> dict:
+    """Add the display-only fields the templates want."""
+    fmt = lambda ts: (datetime.fromtimestamp(int(ts)).strftime("%Y-%m-%d %H:%M")
+                      if ts else "—")
+    return {
+        **record,
+        "generated_disp": fmt(record.get("generated_at")),
+        "period_disp":    f'{fmt(record.get("period_start"))} → {fmt(record.get("period_end"))}',
+    }
+
+
+# Protected, unlike Dashboard/Changes/Integrity/Monitoring. A report carries the
+# FILE CHANGES section — real file names from /mnt/primary — plus flagged paths
+# and raw ERROR lines. That is Backlog/Config sensitivity, not Dashboard's.
+@_protected.get("/reports", response_class=HTMLResponse)
+async def reports_page(request: Request):
+    cfg = load_config()
+    return templates.TemplateResponse(request, "reports.html", {
+        "hostname": cfg.get("nas", {}).get("hostname", "nase"),
+        "page":     "reports",
+        "reports":  [_report_view(r) for r in load_reports()],
+        # So the empty state can say when the first one is due rather than
+        # leaving the reader wondering whether anything is broken.
+        "schedule": cfg.get("status_report", {}).get("schedule", ""),
+        "enabled":  cfg.get("status_report", {}).get("enabled", True),
+    })
+
+
+@_protected.get("/reports/{generated_at}", response_class=HTMLResponse)
+async def report_detail(request: Request, generated_at: int):
+    cfg = load_config()
+    match = next((r for r in load_reports() if r["generated_at"] == generated_at), None)
+    if match is None:
+        raise HTTPException(status_code=404, detail="Report not found")
+    return templates.TemplateResponse(request, "report_detail.html", {
+        "hostname": cfg.get("nas", {}).get("hostname", "nase"),
+        "page":     "reports",
+        "report":   _report_view(match),
+    })
+
+
 @_protected.get("/backlog", response_class=HTMLResponse)
 async def backlog_page(request: Request, status: str = Query(_BACKLOG_DEFAULT_FILTER),
                         ticket_type: str = Query("all", alias="type")):

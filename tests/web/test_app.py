@@ -1,6 +1,7 @@
 """Tests for modules/web/app/main.py."""
 import base64
 import json
+import re
 import time
 from pathlib import Path
 from unittest.mock import patch
@@ -1651,3 +1652,121 @@ def test_nav_more_control_meets_the_touch_target_minimum(client):
 def test_nav_menu_closes_on_escape(client):
     html = client.get("/").text
     assert "Escape" in html and "closeMenu" in html
+
+
+# ── Status reports page (#37) ──────────────────────────────────────────────────
+
+@pytest.fixture
+def reports_dir(tmp_path, monkeypatch):
+    import modules.web.app.main as m
+    d = tmp_path / "reports"
+    d.mkdir()
+    monkeypatch.setattr(m, "REPORTS_DIR", d)
+    return d
+
+
+def _write_report(d, ts, **over):
+    record = {
+        "generated_at": ts, "trigger": "scheduled",
+        "subject": f"NASe status report — nase — {ts}",
+        "period_start": ts - 604800, "period_end": ts,
+        "anomalies": 0, "changes": 0,
+        "body": "NASe status report\n\n=== SYSTEM STATUS ===\n\n  All systems normal.\n",
+    }
+    record.update(over)
+    (d / f"{ts}.json").write_text(json.dumps(record))
+    return record
+
+
+def test_reports_require_login(client, reports_dir):
+    """Stated requirement, not inherited: a report carries file names from
+    /mnt/primary, flagged paths and raw ERROR lines, so unlike Dashboard,
+    Changes, Integrity and Monitoring this page is not public."""
+    _write_report(reports_dir, 1700000000)
+    assert client.get("/reports").status_code == 401
+    assert client.get("/reports/1700000000").status_code == 401
+
+
+def test_reports_listed_newest_first(client, auth_headers, reports_dir):
+    for ts in (1700000000, 1700600000, 1700300000):
+        _write_report(reports_dir, ts)
+    html = client.get("/reports", headers=auth_headers).text
+    order = [int(t) for t in re.findall(r'href="/reports/(\d+)"', html)]
+    assert order == [1700600000, 1700300000, 1700000000]
+
+
+def test_reports_show_the_anomaly_count(client, auth_headers, reports_dir):
+    _write_report(reports_dir, 1700000000, anomalies=3)
+    html = client.get("/reports", headers=auth_headers).text
+    assert ">3<" in html
+    assert "badge-err" in html
+
+
+def test_a_clean_report_is_visibly_clean(client, auth_headers, reports_dir):
+    _write_report(reports_dir, 1700000000, anomalies=0)
+    html = client.get("/reports", headers=auth_headers).text
+    assert "badge-ok" in html
+
+
+def test_reports_empty_state_is_explicit(client, auth_headers, reports_dir):
+    """Genuinely empty on day one — reports were never kept before this page
+    existed, so there is no history to backfill and the reader needs telling
+    that nothing is broken."""
+    html = client.get("/reports", headers=auth_headers).text
+    assert "No reports kept yet" in html
+
+
+def test_reports_empty_state_names_the_schedule(client, auth_headers, reports_dir, monkeypatch):
+    """When a schedule is configured the empty state says when the first report
+    is due, so "nothing here" reads as "not yet" rather than "broken"."""
+    import modules.web.app.main as m
+    base = m.load_config()
+    monkeypatch.setattr(m, "load_config",
+                        lambda: {**base, "status_report": {"enabled": True,
+                                                           "schedule": "Sat *-*-* 03:00:00"}})
+    html = client.get("/reports", headers=auth_headers).text
+    assert "Sat *-*-* 03:00:00" in html
+
+
+def test_reports_empty_state_when_disabled(client, auth_headers, reports_dir, monkeypatch):
+    import modules.web.app.main as m
+    base = m.load_config()
+    monkeypatch.setattr(m, "load_config",
+                        lambda: {**base, "status_report": {"enabled": False, "schedule": "x"}})
+    html = client.get("/reports", headers=auth_headers).text
+    assert "disabled" in html
+
+
+def test_report_detail_renders_the_body(client, auth_headers, reports_dir):
+    _write_report(reports_dir, 1700000000)
+    html = client.get("/reports/1700000000", headers=auth_headers).text
+    assert "=== SYSTEM STATUS ===" in html
+    assert "report-body" in html
+
+
+def test_report_body_is_escaped_not_interpreted(client, auth_headers, reports_dir):
+    """The body is text straight off the drive — file names included — and is
+    rendered in a <pre>. It must never reach the page as markup."""
+    _write_report(reports_dir, 1700000000,
+                  body="a file called <script>alert(1)</script> changed")
+    html = client.get("/reports/1700000000", headers=auth_headers).text
+    assert "<script>alert(1)</script>" not in html
+    assert "&lt;script&gt;" in html
+
+
+def test_unknown_report_is_a_404(client, auth_headers, reports_dir):
+    assert client.get("/reports/12345", headers=auth_headers).status_code == 404
+
+
+def test_a_malformed_report_is_skipped_not_fatal(client, auth_headers, reports_dir):
+    """Written by one shell script and copied to the drive by another, so one
+    unreadable entry should cost that entry and nothing more."""
+    _write_report(reports_dir, 1700000000)
+    (reports_dir / "1700400000.json").write_text("{ this is not json")
+    (reports_dir / "1700500000.json").write_text('{"no_generated_at": true}')
+    html = client.get("/reports", headers=auth_headers).text
+    assert re.findall(r'href="/reports/(\d+)"', html) == ["1700000000"]
+
+
+def test_reports_appear_in_the_nav(client):
+    assert 'href="/reports"' in client.get("/").text

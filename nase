@@ -610,6 +610,10 @@ cmd_report() {
         set -a; source "${REPO_ROOT}/.env"; set +a
     fi
     log_info "Generating and sending status report now..."
+    # Distinguishes this from the timer's run in the archived report (#37).
+    # systemd's INVOCATION_ID would work without touching the CLI, but it is
+    # implicit, and someone will eventually run report.sh by hand from a unit.
+    export NASE_REPORT_TRIGGER=manual
     exec "${REPO_ROOT}/modules/status-report/report.sh"
 }
 

@@ -399,7 +399,34 @@ if [[ $n_anomalies -gt 0 ]]; then
     [[ $n_anomalies -gt 1 ]] && subject="${subject%[*}[${n_anomalies} ANOMALIES]"
 fi
 
-# ── Send ──────────────────────────────────────────────────────────────────────
+# ── Archive, then send ────────────────────────────────────────────────────────
+# Written before the notifier runs, not after. The report is most worth keeping
+# when delivery failed, and notify.sh gives up with a warning on several paths
+# (SMTP_HOST unset, WEBHOOK_URL unset, unknown method) — in each of those the
+# report used to evaporate. Archiving first also means an SMTP hard failure,
+# which aborts this script under `set -euo pipefail` before the stamp is
+# touched, still leaves the report readable. With notifications.method: none it
+# turns a report that was composed and discarded into a local-only one.
+#
+# python3, not hand-rolled JSON: escaping a multi-line body in bash is a bug
+# waiting to happen, and python3 is already how NASe shell handles JSON (see
+# modules/config-archive/archive.sh). Written to a temp file in the same
+# directory and os.replace'd, the same atomic pattern as save_backlog in
+# main.py — a half-written report read by the web page is the one failure mode
+# that would look like corruption, and archive.sh copies this whole directory
+# to the drive at whatever instant it happens to run. See backlog #37.
+REPORTS_DIR="${STAMP_DIR}/reports"
+mkdir -p "$REPORTS_DIR"
+if ! NASE_REPORTS_DIR="$REPORTS_DIR" \
+     R_TS="$now_ts" R_TRIGGER="${NASE_REPORT_TRIGGER:-scheduled}" \
+     R_SUBJECT="$subject" R_SINCE="$since_ts" \
+     R_ANOMALIES="$n_anomalies" R_CHANGES="$total_ops" \
+     R_BODY="$(printf '%b' "$body")" \
+     python3 "${REPO_ROOT}/modules/status-report/write_report.py"; then
+    # A report that cannot be archived is still worth sending.
+    log_warn "Could not archive the report to ${REPORTS_DIR} — sending it anyway."
+fi
+
 log_info "Sending status report (anomalies: ${n_anomalies}, changes: ${total_ops})..."
 printf '%b' "$body" | "${REPO_ROOT}/modules/sync/notify.sh" "$subject"
 

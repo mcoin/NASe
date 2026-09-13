@@ -189,4 +189,78 @@ assert_contains "a missing cache is reported, not fatal" \
 assert_contains "and the rest of the report still renders" \
     "=== FILE CHANGES" "$REPORT_NOCACHE"
 
+# ── Reports are archived to the SD card (#37) ─────────────────────────────────
+# Before this, every report NASe produced existed only in the mailbox it was
+# sent to: report.sh composed the body into a variable, piped it to the
+# notifier, and exited.
+REPORTS="${STAMPS}/reports"
+
+# Self-contained: earlier blocks in this suite deliberately delete the integrity
+# cache and leave a status-report stamp behind, so without restoring both the
+# report here legitimately has nothing to report and the counts below would be
+# asserting the wrong thing for the right reason.
+cat > "${STAMPS}/integrity-status/mnt-primary.json" <<EOF
+{"has_manifest":true,"total":1000,"ok":999,"flagged":1,
+ "discovery_complete":false,"discovery_total":"2000","discovery_cursor_n":"1500",
+ "flagged_truncated":false,"updated_at":${NOW},
+ "flagged_rows":[{"path":"movies/bad.mkv","last_checked":${NOW},"event_type":"mismatch","detail":"checksum changed"}],
+ "recent_events":[]}
+EOF
+rm -f "${STAMPS}/status-report.stamp"
+
+rm -rf "$REPORTS"
+run_report >/dev/null
+assert_eq "one report file is written" "1" "$(ls -1 "$REPORTS"/*.json 2>/dev/null | wc -l)"
+
+REPORT_JSON=$(ls -1 "$REPORTS"/*.json | head -1)
+assert_exit0 "the archived report is valid JSON" \
+    python3 -c "import json,sys; json.load(open(sys.argv[1]))" "$REPORT_JSON"
+
+field() { python3 -c "import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]])" "$REPORT_JSON" "$1"; }
+
+# The metadata is what the list view renders, so it has to match the body it
+# was written with rather than be re-derived from the rendered text later.
+assert_eq "records the anomaly count"  "1" "$(field anomalies)"
+assert_eq "records the change count"   "2" "$(field changes)"
+assert_contains "records the subject"  "NASe status report" "$(field subject)"
+assert_contains "records the body"     "=== SYSTEM STATUS ===" "$(field body)"
+assert_contains "the body is the whole report" "INTEGRITY STATUS" "$(field body)"
+assert_eq "defaults to the scheduled trigger" "scheduled" "$(field trigger)"
+assert_eq "names the file after generated_at" \
+    "$(field generated_at).json" "$(basename "$REPORT_JSON")"
+
+# An interactive run is distinguishable from the timer's.
+rm -rf "$REPORTS"
+rm -f "${STAMPS}/status-report.stamp"
+NASE_REPORT_TRIGGER=manual run_report >/dev/null
+REPORT_JSON=$(ls -1 "$REPORTS"/*.json | head -1)
+assert_eq "an interactive run is marked manual" "manual" "$(field trigger)"
+
+# Nothing prunes: keeping every report is the decision on #37.
+sleep 1
+run_report >/dev/null
+assert_eq "a second run adds a file rather than replacing one" "2" \
+    "$(ls -1 "$REPORTS"/*.json | wc -l)"
+
+# The report is most worth having when delivery failed, which is why the
+# archive is written before the notifier rather than after it.
+rm -rf "$REPORTS"
+cat > "$RR/modules/sync/notify.sh" <<'STUB'
+#!/usr/bin/env bash
+cat >/dev/null
+echo "delivery exploded" >&2
+exit 1
+STUB
+chmod +x "$RR/modules/sync/notify.sh"
+run_report >/dev/null 2>&1 || true
+assert_eq "archived even when the notifier fails" "1" \
+    "$(ls -1 "$REPORTS"/*.json 2>/dev/null | wc -l)"
+# Restore the passthrough notifier for anything after this.
+printf '#!/usr/bin/env bash\ncat\n' > "$RR/modules/sync/notify.sh"
+chmod +x "$RR/modules/sync/notify.sh"
+
+# No temp files are left behind by the atomic write.
+assert_eq "no .tmp files left in the reports directory" "0" \
+    "$(ls -1 "$REPORTS"/*.tmp 2>/dev/null | wc -l)"
+
 test_summary

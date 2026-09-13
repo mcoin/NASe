@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Report {{ report.generated_disp }}{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div class="card-head">
+    <span>{{ report.generated_disp }}</span>
+    <a href="/reports" class="win-btn" style="text-decoration:none; display:inline-block;">&#8592; All reports</a>
+  </div>
+  <div class="form-body">
+    <div class="form-row">
+      <label class="form-label">Period</label>
+      <div class="form-field"><span class="form-hint">{{ report.period_disp }}</span></div>
+    </div>
+    <div class="form-row">
+      <label class="form-label">Trigger</label>
+      <div class="form-field"><span class="badge badge-muted">{{ report.trigger }}</span></div>
+    </div>
+    <div class="form-row">
+      <label class="form-label">Anomalies</label>
+      <div class="form-field">
+        {% if report.anomalies %}
+        <span class="badge badge-err">{{ report.anomalies }}</span>
+        {% else %}
+        <span class="badge badge-ok">none</span>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-head"><span>{{ report.subject }}</span></div>
+  {# The body is pre-formatted plain text with column alignment, so it is shown
+     as-is in a <pre>. Jinja escapes it — it must never be re-rendered as HTML,
+     since it carries file names and log lines straight from the drive. #}
+  <pre class="report-body">{{ report.body }}</pre>
+</div>
+{% endblock %}

@@ -42,6 +42,17 @@ SOURCES=(
     "config.yaml=${REPO_ROOT}/config.yaml"
     "backlog.json=${NASE_BACKLOG_FILE:-${STAMP_DIR}/backlog.json}"
     "backlog-attachments=${NASE_ATTACHMENT_DIR:-${STAMP_DIR}/backlog-attachments}"
+    # Status reports (#37). Listed here rather than given their own flush so
+    # they can never become a *reason* to spin a drive up: they ride a flush
+    # that was already happening for config.yaml or backlog.json, or one of
+    # the existing triggers below (the pinned day, the drive already being
+    # awake, the max-age backstop). Adding a fourth source does not make any
+    # of those fire more often.
+    #
+    # Nothing is lost to snapshot pruning despite retention_days: snapshots are
+    # full copies and this directory only ever grows, so the newest snapshot
+    # always holds every report.
+    "reports=${NASE_REPORTS_DIR:-${STAMP_DIR}/reports}"
 )
 
 # ── Which sources changed since the last archive? ────────────────────────────

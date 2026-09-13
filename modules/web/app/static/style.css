@@ -1401,3 +1401,28 @@ td.mono  { font-family: monospace; font-size: 0.8rem; color: var(--muted); }
   color: var(--err);
   font-size: 0.85rem;
 }
+
+/* ── Status reports (backlog #37) ────────────────────────────────────────── */
+.report-link {
+  color: var(--text);
+  font-weight: 600;
+  text-decoration: none;
+}
+.report-link:hover { text-decoration: underline; }
+
+/* The report is plain text laid out with spaces, so it needs a mono font and
+   its own newlines respected. It can be long, hence the scroll rather than a
+   page that runs for several screens. */
+.report-body {
+  margin: 0;
+  padding: 1rem;
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--card);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 70vh;
+  overflow: auto;
+}

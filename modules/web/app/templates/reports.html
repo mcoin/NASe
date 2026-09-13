@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Reports{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div class="card-head">
+    <span>Status reports</span>
+    {% if reports %}<span class="form-hint">{{ reports|length }} kept</span>{% endif %}
+  </div>
+
+  {% if reports %}
+  <table class="responsive-table">
+    <thead>
+      <tr>
+        <th>Generated</th>
+        <th>Period</th>
+        <th>Trigger</th>
+        <th>Changes</th>
+        <th>Anomalies</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in reports %}
+      <tr>
+        <td data-label="Generated">
+          <a class="report-link" href="/reports/{{ r.generated_at }}">{{ r.generated_disp }}</a>
+        </td>
+        <td class="mono" data-label="Period">{{ r.period_disp }}</td>
+        <td data-label="Trigger">
+          <span class="badge badge-muted">{{ r.trigger }}</span>
+        </td>
+        <td data-label="Changes">{{ r.changes }}</td>
+        {# The number worth seeing without opening anything: a week with
+           nothing wrong should be visibly different from one without. #}
+        <td data-label="Anomalies">
+          {% if r.anomalies %}
+          <span class="badge badge-err">{{ r.anomalies }}</span>
+          {% else %}
+          <span class="badge badge-ok">none</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {% else %}
+  {# Genuinely empty on day one: reports were never kept before this page
+     existed, so there is no history to backfill. Say when the next one is due
+     rather than leaving the reader wondering what is broken. #}
+  <div class="changes-empty">
+    {% if not enabled %}
+    Status reports are disabled (<code>status_report.enabled</code> in config.yaml).
+    {% elif schedule %}
+    No reports kept yet — the next one is generated on <code>{{ schedule }}</code>,
+    and will appear here once it has been.
+    {% else %}
+    No reports kept yet.
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
