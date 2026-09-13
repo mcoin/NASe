@@ -1590,3 +1590,64 @@ def test_drive_info_never_asks_findmnt_target(monkeypatch):
     findmnt_calls = [a for a in seen if a and a[0] == "findmnt"]
     assert findmnt_calls, "drive_info should consult findmnt"
     assert not any("--target" in a for a in findmnt_calls)
+
+
+# ── Nav overflow menu (#18) ────────────────────────────────────────────────────
+
+def test_nav_still_lists_every_page(client):
+    """The bar #17 set, which #18 must not drop below: every page reachable.
+    The tabs are all in the markup; the script only moves them between the row
+    and the menu, so if one is missing here it is missing everywhere."""
+    html = client.get("/").text
+    for href in ("/changes", "/integrity", "/monitoring", "/backlog", "/config"):
+        assert f'href="{href}"' in html
+
+
+def test_nav_has_an_overflow_control(client):
+    html = client.get("/").text
+    assert 'id="nav-more-btn"' in html
+    assert 'aria-expanded="false"' in html      # closed until the user opens it
+    assert 'aria-haspopup="true"' in html
+    assert 'aria-label="More pages"' in html    # the … glyph alone names nothing
+
+
+def test_nav_degrades_without_javascript(client):
+    """The row may only stop wrapping once the script is running. The
+    stylesheet must never set nowrap on its own, or a browser with the script
+    blocked gets a bar that overflows the document sideways — the bug #17
+    existed to fix."""
+    css = (REPO_ROOT / "modules/web/app/static/style.css").read_text()
+    nav_block = css[css.index("/* ── Site nav"):css.index("/* ── Nav overflow menu")]
+    assert "flex-wrap: wrap" in nav_block
+    assert "nowrap" not in nav_block            # only .nav-js, set by the script
+    assert ".site-nav.nav-js" in css and "flex-wrap: nowrap" in css
+
+
+def test_nav_more_container_is_really_hidden_when_empty(client):
+    """An author `display: flex` beats the UA stylesheet's [hidden] rule, so
+    without an explicit override the … control keeps its ~44px of width while
+    reporting itself hidden — which overflowed the document by exactly that
+    much before it was caught."""
+    css = (REPO_ROOT / "modules/web/app/static/style.css").read_text()
+    assert ".nav-more[hidden] { display: none; }" in css
+
+
+def test_nav_tabs_do_not_shrink(client):
+    """Flex items default to flex-shrink: 1, so in a nowrap row the tabs are
+    squeezed and getBoundingClientRect reports the squeezed width — the script
+    then adds those up, concludes everything fits, and moves nothing while the
+    bar still overflows."""
+    css = (REPO_ROOT / "modules/web/app/static/style.css").read_text()
+    assert ".site-nav.nav-js > a," in css
+    assert "flex: 0 0 auto" in css
+
+
+def test_nav_more_control_meets_the_touch_target_minimum(client):
+    css = (REPO_ROOT / "modules/web/app/static/style.css").read_text()
+    block = css[css.index(".nav-more-btn {"):]
+    assert "min-height: 44px" in block[:400]
+
+
+def test_nav_menu_closes_on_escape(client):
+    html = client.get("/").text
+    assert "Escape" in html and "closeMenu" in html

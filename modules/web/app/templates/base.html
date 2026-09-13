@@ -15,20 +15,147 @@
   <span class="host">{{ hostname }}</span>
 </header>
 
-<nav class="site-nav">
+{# The tabs that do not fit are moved behind the … control by the script at
+   the bottom of this file (backlog #18). The markup stays a plain row of
+   links: with no JavaScript the bar keeps #17's wrapping behaviour and every
+   tab remains visible, so the enhancement cannot make navigation worse than
+   it is today. #}
+<nav class="site-nav" id="site-nav">
   <a href="/"        {% if page == "dashboard" %}class="active"{% endif %}>Dashboard</a>
   <a href="/changes"   {% if page == "changes"   %}class="active"{% endif %}>Changes</a>
   <a href="/integrity" {% if page == "integrity" %}class="active"{% endif %}>Integrity</a>
   <a href="/monitoring" {% if page == "monitoring" %}class="active"{% endif %}>Monitoring</a>
   <a href="/backlog"   {% if page == "backlog"    %}class="active"{% endif %}>Backlog</a>
   <a href="/config"    {% if page == "config"    %}class="active"{% endif %}>Config</a>
+  <div class="nav-more" id="nav-more" hidden>
+    <button type="button" class="nav-more-btn" id="nav-more-btn"
+            aria-expanded="false" aria-haspopup="true" aria-label="More pages">&hellip;</button>
+    <div class="nav-more-menu" id="nav-more-menu" role="menu" hidden></div>
+  </div>
 </nav>
 
 <main>
 {% block content %}{% endblock %}
 </main>
 
-{% block scripts %}{% endblock %}
+<script>
+/* Nav overflow menu (backlog #18).
+ *
+ * #17 made every tab reachable on a phone by letting the bar wrap, at the cost
+ * of a second row of chrome on every page. This puts the row back to one line
+ * and tucks whatever does not fit behind a … control.
+ *
+ * Measured rather than guessed at a breakpoint: a tab has been added or
+ * renamed twice already, and a CSS-only split would silently be wrong the next
+ * time it happens.
+ *
+ * Progressive enhancement on purpose. The stylesheet still wraps the bar; only
+ * this script sets .nav-js, which switches it to a single nowrap row. If the
+ * script does not run, the page is exactly what #17 shipped rather than a row
+ * that overflows the viewport — which is the bug #17 existed to fix.
+ */
+(function () {
+  var nav  = document.getElementById('site-nav');
+  var more = document.getElementById('nav-more');
+  var btn  = document.getElementById('nav-more-btn');
+  var menu = document.getElementById('nav-more-menu');
+  if (!nav || !more || !btn || !menu) return;
 
+  var links = Array.prototype.slice.call(nav.querySelectorAll(':scope > a'));
+  if (!links.length) return;
+  nav.classList.add('nav-js');
+
+  function closeMenu() {
+    menu.hidden = true;
+    btn.setAttribute('aria-expanded', 'false');
+  }
+
+  function layout() {
+    closeMenu();
+    // Start from a known state: every link back in the row, in source order,
+    // so a resize in either direction is measured the same way.
+    links.forEach(function (a) { nav.insertBefore(a, more); });
+    more.hidden = false;
+
+    var style = window.getComputedStyle(nav);
+    var gap   = parseFloat(style.columnGap || style.gap) || 0;
+    var avail = nav.clientWidth
+              - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+
+    // Width of every link plus the gaps between them.
+    var widths = links.map(function (a) { return a.getBoundingClientRect().width; });
+    var total  = widths.reduce(function (s, w) { return s + w; }, 0)
+               + gap * (links.length - 1);
+
+    if (total <= avail) {           // everything fits: no menu at all
+      more.hidden = true;
+      btn.classList.remove('active');
+      return;
+    }
+
+    // Room for the … control has to be reserved before deciding what fits,
+    // or the last link kept in the row pushes the control off the end.
+    var budget  = avail - more.getBoundingClientRect().width - gap;
+    var used     = 0;
+    var overflow = [];
+    links.forEach(function (a, i) {
+      // Once one tab has overflowed every later tab goes with it. Without the
+      // flag a narrower tab further along still "fits" the remaining budget
+      // and stays in the row, so the bar shows a subset rather than a prefix:
+      // at 430px that put Backlog in the row while Monitoring sat in the menu.
+      if (overflow.length === 0) {
+        var need = widths[i] + (used > 0 ? gap : 0);
+        if (used + need <= budget) { used += need; return; }
+      }
+      overflow.push(a);
+    });
+
+    // Keep at least one tab in the row: a bar that is only a … control tells
+    // the reader nothing about where they are.
+    if (overflow.length === links.length) overflow.shift();
+
+    var activeHidden = false;
+    overflow.forEach(function (a) {
+      if (a.classList.contains('active')) activeHidden = true;
+      menu.appendChild(a);
+    });
+    // If the current page ended up inside the menu, the control carries the
+    // active marker, so the bar still answers "where am I" (#18 allows either
+    // this or keeping the active tab in the row; this keeps source order).
+    btn.classList.toggle('active', activeHidden);
+  }
+
+  btn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    var open = menu.hidden;
+    menu.hidden = !open;
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
+
+  document.addEventListener('click', function (e) {
+    if (!menu.hidden && !more.contains(e.target)) closeMenu();
+  });
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && !menu.hidden) { closeMenu(); btn.focus(); }
+  });
+
+  var pending;
+  window.addEventListener('resize', function () {
+    clearTimeout(pending);
+    pending = setTimeout(layout, 100);
+  });
+  // orientationchange fires before the new dimensions settle on some phones,
+  // so re-measure on the resize that follows it rather than immediately.
+  window.addEventListener('orientationchange', function () {
+    clearTimeout(pending);
+    pending = setTimeout(layout, 200);
+  });
+
+  layout();
+})();
+</script>
+
+{% block scripts %}{% endblock %}
 </body>
 </html>

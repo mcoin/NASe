@@ -270,11 +270,89 @@ td.mono  { font-family: monospace; font-size: 0.8rem; color: var(--muted); }
 .site-nav a:hover   { color: rgba(255,255,255,0.85); }
 .site-nav a.active  { color: #fff; border-bottom-color: #60a5fa; }
 
-/* Trim the horizontal padding on phones so the wrapped bar settles into two
-   balanced rows (4 + 2 at 390px) instead of a nearly empty second row. */
+/* Trim the horizontal padding on phones. With the overflow script running this
+   simply fits one more tab in the row before the … control; without it, the
+   bar falls back to #17's wrapping and this keeps the two rows balanced. */
 @media (max-width: 520px) {
   .site-nav   { padding: 0 0.5rem; }
   .site-nav a { padding: 0.5rem 0.5rem; }
+}
+
+/* ── Nav overflow menu (backlog #18) ─────────────────────────────────────── */
+/* .nav-js is set by the script in base.html, never by the stylesheet. Only
+   once the script is running may the bar stop wrapping — otherwise a row that
+   no longer wraps and has no menu to absorb the excess would overflow the
+   document sideways, which is exactly the bug #17 fixed. */
+.site-nav.nav-js {
+  flex-wrap: nowrap;
+  position: relative;
+  overflow: visible;
+}
+
+/* flex-shrink must be off, and this is load-bearing rather than cosmetic.
+   A flex item defaults to flex-shrink: 1, so in a nowrap row the links are
+   squeezed when they do not fit and getBoundingClientRect() then reports the
+   squeezed width — the script adds those up, concludes everything fits, and
+   moves nothing into the menu while the bar still overflows the document by
+   the amount the text refused to shrink. Measured at 500px: the row reported
+   fitting while scrollWidth was 512 against an innerWidth of 500. */
+.site-nav.nav-js > a,
+.site-nav.nav-js > .nav-more { flex: 0 0 auto; }
+
+.nav-more { position: relative; display: flex; align-items: stretch; }
+/* An author `display: flex` beats the UA stylesheet's [hidden] { display: none },
+   so without this the … control stays in the row while claiming to be hidden —
+   taking ~44px of width the script had already decided it did not need, and
+   overflowing the document by exactly that much. */
+.nav-more[hidden] { display: none; }
+
+.nav-more-btn {
+  /* 44px is the iOS HIG minimum touch target; the tabs themselves are ~33px,
+     and this control is the one a thumb has to find. */
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 0.6rem;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: rgba(255,255,255,0.55);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.nav-more-btn:hover  { color: rgba(255,255,255,0.85); }
+.nav-more-btn.active { color: #fff; border-bottom-color: #60a5fa; }
+.nav-more-btn:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: -2px;
+}
+
+.nav-more-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 30;
+  min-width: 10rem;
+  display: flex;
+  flex-direction: column;
+  background: var(--header-bg);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 0 0 6px 6px;
+  box-shadow: 0 6px 16px rgba(0,0,0,0.35);
+}
+.nav-more-menu[hidden] { display: none; }
+
+/* Full-width rows in the dropdown: the underline that marks the active tab in
+   the bar would read as an arbitrary rule here, so the active row is tinted
+   instead. */
+.nav-more-menu a {
+  border-bottom: none;
+  padding: 0.6rem 0.9rem;
+  white-space: nowrap;
+}
+.nav-more-menu a.active {
+  color: #fff;
+  background: rgba(96,165,250,0.18);
 }
 
 /* ── Section tabs (config page) ──────────────────────────────────────────── */
