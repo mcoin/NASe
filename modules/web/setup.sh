@@ -6,6 +6,7 @@ set -euo pipefail
 
 REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 source "${REPO_ROOT}/lib/log.sh"
+source "${REPO_ROOT}/lib/files.sh"
 source "${REPO_ROOT}/lib/config.sh"
 
 WEB_DIR="${REPO_ROOT}/modules/web"
@@ -62,9 +63,7 @@ WantedBy=multi-user.target"
 
 need_restart=false
 
-if [[ ! -f "$WEB_UNIT" ]] || ! diff -q <(echo "$unit_content") "$WEB_UNIT" &>/dev/null; then
-    log_info "Writing ${WEB_UNIT}"
-    echo "$unit_content" > "$WEB_UNIT"
+if write_if_changed "$WEB_UNIT" "$unit_content" ""; then
     systemctl daemon-reload
     need_restart=true
 fi

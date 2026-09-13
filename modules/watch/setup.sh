@@ -6,6 +6,7 @@ set -euo pipefail
 
 REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 source "${REPO_ROOT}/lib/log.sh"
+source "${REPO_ROOT}/lib/files.sh"
 source "${REPO_ROOT}/lib/config.sh"
 
 SERVICE_FILE="/etc/systemd/system/nase-watch.service"
@@ -45,9 +46,7 @@ StandardError=journal
 [Install]
 WantedBy=multi-user.target"
 
-if [[ ! -f "$SERVICE_FILE" ]] || ! diff -q <(echo "$service_content") "$SERVICE_FILE" &>/dev/null; then
-    log_info "Writing ${SERVICE_FILE}"
-    echo "$service_content" > "$SERVICE_FILE"
+if write_if_changed "$SERVICE_FILE" "$service_content" ""; then
     systemctl daemon-reload
 fi
 

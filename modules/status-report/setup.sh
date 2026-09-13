@@ -6,6 +6,7 @@ set -euo pipefail
 
 REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 source "${REPO_ROOT}/lib/log.sh"
+source "${REPO_ROOT}/lib/files.sh"
 source "${REPO_ROOT}/lib/config.sh"
 
 SYSTEMD_DIR="${SYSTEMD_DIR:-/etc/systemd/system}"
@@ -42,10 +43,7 @@ EnvironmentFile=-${REPO_ROOT}/.env
 [Install]
 WantedBy=multi-user.target"
 
-if [[ ! -f "$service_file" ]] || ! diff -q <(echo "$service_content") "$service_file" &>/dev/null; then
-    log_info "  Writing ${service_file}"
-    echo "$service_content" > "$service_file"
-fi
+write_if_changed "$service_file" "$service_content" "  " || true
 
 # ── Timer unit ────────────────────────────────────────────────────────────────
 timer_file="${SYSTEMD_DIR}/${UNIT_BASE}.timer"
@@ -61,10 +59,7 @@ Unit=${UNIT_BASE}.service
 [Install]
 WantedBy=timers.target"
 
-if [[ ! -f "$timer_file" ]] || ! diff -q <(echo "$timer_content") "$timer_file" &>/dev/null; then
-    log_info "  Writing ${timer_file}"
-    echo "$timer_content" > "$timer_file"
-fi
+write_if_changed "$timer_file" "$timer_content" "  " || true
 
 systemctl daemon-reload
 systemctl enable --now "${UNIT_BASE}.timer"

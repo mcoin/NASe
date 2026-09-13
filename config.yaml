@@ -336,3 +336,23 @@ notifications:
 status_report:
   enabled: true
   schedule: 'Sat *-*-* 03:00:00'
+
+# --------------------------------------------------------------------------
+# File watch
+# --------------------------------------------------------------------------
+# Watch files or folders on the share and send a notification on file events.
+# Nothing is installed while this section is absent or empty: modules/watch
+# removes nase-watch.service and exits.
+#
+# events: list of "modify" | "delete" | "create"
+# label:  human-readable name used in the notification subject line.
+# A 60-second cooldown prevents notification floods for the same watch entry.
+#
+# file_watch:
+#   - path: /mnt/primary/Documents/
+#     label: "Documents"
+#     events: [modify, delete]
+#   - path: /mnt/primary/important.txt
+#     label: "Important file"
+#     events: [modify, delete, create]
+# --------------------------------------------------------------------------

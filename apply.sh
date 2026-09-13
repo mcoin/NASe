@@ -9,6 +9,7 @@ export REPO_ROOT
 
 # shellcheck source=lib/log.sh
 source "${REPO_ROOT}/lib/log.sh"
+source "${REPO_ROOT}/lib/files.sh"
 # shellcheck source=lib/config.sh
 source "${REPO_ROOT}/lib/config.sh"
 # shellcheck source=lib/checks.sh
@@ -76,10 +77,9 @@ for unit_src in "${REPO_ROOT}/systemd/"*; do
     unit_name=$(basename "$unit_src")
     unit_dest="/etc/systemd/system/${unit_name}"
     rendered=$(sed "s#__REPO_ROOT__#${REPO_ROOT}#g" "$unit_src")
-    if [[ ! -f "$unit_dest" ]] || ! diff -q <(echo "$rendered") "$unit_dest" &>/dev/null; then
-        log_info "Installing unit: ${unit_name}"
-        echo "$rendered" > "$unit_dest"
-    fi
+    # Logs "Writing <path>" now rather than "Installing unit: <name>" — one
+    # wording for every generated file, and the path is the more useful half.
+    write_if_changed "$unit_dest" "$rendered" "" || true
 done
 
 systemctl daemon-reload

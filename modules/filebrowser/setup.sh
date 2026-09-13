@@ -25,6 +25,7 @@ set -euo pipefail
 
 REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 source "${REPO_ROOT}/lib/log.sh"
+source "${REPO_ROOT}/lib/files.sh"
 source "${REPO_ROOT}/lib/config.sh"
 
 FB_BIN="/usr/local/bin/filebrowser"
@@ -168,9 +169,7 @@ Options=bind
 [Install]
 WantedBy=filebrowser.service"
 
-    if [[ ! -f "$unit_file" ]] || ! diff -q <(echo "$content") "$unit_file" &>/dev/null; then
-        log_info "Writing ${unit_file}"
-        echo "$content" > "$unit_file"
+    if write_if_changed "$unit_file" "$content" ""; then
         systemctl daemon-reload
     fi
 
@@ -267,9 +266,7 @@ settings=$(cat <<EOF
 EOF
 )
 
-if [[ ! -f "$FB_CFG" ]] || ! diff -q <(echo "$settings") "$FB_CFG" &>/dev/null; then
-    log_info "Writing ${FB_CFG}"
-    echo "$settings" > "$FB_CFG"
+if write_if_changed "$FB_CFG" "$settings" ""; then
     CONFIG_CHANGED=true
 else
     CONFIG_CHANGED=false
@@ -327,9 +324,7 @@ Group=${fb_user}
 [Install]
 WantedBy=multi-user.target"
 
-if [[ ! -f "$FB_UNIT" ]] || ! diff -q <(echo "$unit_content") "$FB_UNIT" &>/dev/null; then
-    log_info "Writing ${FB_UNIT}"
-    echo "$unit_content" > "$FB_UNIT"
+if write_if_changed "$FB_UNIT" "$unit_content" ""; then
     systemctl daemon-reload
 fi
 

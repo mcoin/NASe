@@ -18,6 +18,7 @@ set -euo pipefail
 
 REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 source "${REPO_ROOT}/lib/log.sh"
+source "${REPO_ROOT}/lib/files.sh"
 source "${REPO_ROOT}/lib/config.sh"
 
 SYSTEMD_DIR="${SYSTEMD_DIR:-/etc/systemd/system}"
@@ -80,10 +81,7 @@ IOSchedulingPriority=7
 [Install]
 WantedBy=multi-user.target"
 
-    if [[ ! -f "$service_file" ]] || ! diff -q <(echo "$service_content") "$service_file" &>/dev/null; then
-        log_info "    Writing ${service_file}"
-        echo "$service_content" > "$service_file"
-    fi
+    write_if_changed "$service_file" "$service_content" "    " || true
 
     # ── Retire the per-job timer, if this install still has one ────────────────
     # The group timer below now drives this job. Left in place it would fire the
@@ -138,10 +136,7 @@ Nice=10
 [Install]
 WantedBy=multi-user.target"
 
-    if [[ ! -f "$group_service_file" ]] || ! diff -q <(echo "$group_service_content") "$group_service_file" &>/dev/null; then
-        log_info "    Writing ${group_service_file}"
-        echo "$group_service_content" > "$group_service_file"
-    fi
+    write_if_changed "$group_service_file" "$group_service_content" "    " || true
 
     group_timer_file="${SYSTEMD_DIR}/${group_base}.timer"
     group_timer_content="# Managed by NASe — do not edit manually. Re-run apply.sh instead.
@@ -157,10 +152,7 @@ Unit=${group_base}.service
 [Install]
 WantedBy=timers.target"
 
-    if [[ ! -f "$group_timer_file" ]] || ! diff -q <(echo "$group_timer_content") "$group_timer_file" &>/dev/null; then
-        log_info "    Writing ${group_timer_file}"
-        echo "$group_timer_content" > "$group_timer_file"
-    fi
+    write_if_changed "$group_timer_file" "$group_timer_content" "    " || true
 
     _systemctl daemon-reload
     _systemctl enable --now "${group_base}.timer"

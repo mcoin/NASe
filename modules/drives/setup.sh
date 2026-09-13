@@ -6,6 +6,7 @@ set -euo pipefail
 
 REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 source "${REPO_ROOT}/lib/log.sh"
+source "${REPO_ROOT}/lib/files.sh"
 source "${REPO_ROOT}/lib/config.sh"
 
 SYSTEMD_DIR="/etc/systemd/system"
@@ -134,10 +135,7 @@ Options=${read_only:+ro,}defaults,nofail,noatime
 WantedBy=multi-user.target"
 
     # Write unit only when content has changed
-    if [[ ! -f "$unit_file" ]] || ! diff -q <(echo "$unit_content") "$unit_file" &>/dev/null; then
-        log_info "  Writing ${unit_file}"
-        echo "$unit_content" > "$unit_file"
-    fi
+    write_if_changed "$unit_file" "$unit_content" "  " || true
 
     systemctl daemon-reload
     systemctl enable "${unit_base}.mount"
@@ -175,10 +173,7 @@ Environment=REPO_ROOT=${REPO_ROOT}
 WantedBy=multi-user.target"
 
 spin_sample_service_file="${SYSTEMD_DIR}/nase-spin-sample.service"
-if [[ ! -f "$spin_sample_service_file" ]] || ! diff -q <(echo "$spin_sample_service") "$spin_sample_service_file" &>/dev/null; then
-    log_info "Writing ${spin_sample_service_file}"
-    echo "$spin_sample_service" > "$spin_sample_service_file"
-fi
+write_if_changed "$spin_sample_service_file" "$spin_sample_service" "" || true
 
 # Not config-driven — 5 minutes balances timeline resolution against SD-card
 # write churn (see spin_sample.sh); even at this interval the 30-day window
@@ -197,10 +192,7 @@ Unit=nase-spin-sample.service
 WantedBy=timers.target"
 
 spin_sample_timer_file="${SYSTEMD_DIR}/nase-spin-sample.timer"
-if [[ ! -f "$spin_sample_timer_file" ]] || ! diff -q <(echo "$spin_sample_timer") "$spin_sample_timer_file" &>/dev/null; then
-    log_info "Writing ${spin_sample_timer_file}"
-    echo "$spin_sample_timer" > "$spin_sample_timer_file"
-fi
+write_if_changed "$spin_sample_timer_file" "$spin_sample_timer" "" || true
 
 systemctl daemon-reload
 systemctl enable --now nase-spin-sample.timer
