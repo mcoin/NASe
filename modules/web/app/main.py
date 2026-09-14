@@ -28,7 +28,11 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
 APP_DIR     = Path(__file__).parent
-REPO_ROOT   = Path(os.environ.get("REPO_ROOT", APP_DIR.parent.parent))
+# parents[2], not .parent.parent: APP_DIR is <repo>/modules/web/app, so two
+# levels up is <repo>/modules and CONFIG_FILE becomes <repo>/modules/config.yaml.
+# nase-web.service always sets REPO_ROOT, which masked this — it only shows up
+# running uvicorn by hand, where every request 500s on a missing config file.
+REPO_ROOT   = Path(os.environ.get("REPO_ROOT", APP_DIR.parents[2]))
 CONFIG_FILE = REPO_ROOT / "config.yaml"
 STAMP_DIR   = Path("/var/lib/nase")
 LOG_DIR     = Path("/var/log/nase")
