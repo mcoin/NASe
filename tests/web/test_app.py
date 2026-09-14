@@ -2,6 +2,7 @@
 import base64
 import json
 import re
+from datetime import datetime, timedelta
 import time
 from pathlib import Path
 from unittest.mock import patch
@@ -1888,3 +1889,68 @@ def test_spin_history_writer_and_reader_agree_on_the_columns():
     assert documented, "spin_sample.sh no longer documents its line format"
     names = documented.group(1).split(r"\t")
     assert [n.strip("<>") for n in names[:3]] == ["epoch", "drive", "state"], names
+
+
+# ── The changes page shows file activity, not the watcher's bookkeeping (#39) ──
+
+@pytest.fixture
+def events_log(tmp_path, monkeypatch):
+    import modules.web.app.main as m
+    log = tmp_path / "primary-events.log"
+    monkeypatch.setattr(m, "EVENTS_LOG", log)
+    return log
+
+
+def _events(log, rows):
+    now = datetime.now()
+    lines = []
+    for mins, op, path in rows:
+        ts = (now - timedelta(minutes=mins)).strftime("%Y-%m-%d %H:%M:%S")
+        lines.append(f"{ts}\t{op}\t{path}")
+    log.write_text("\n".join(lines) + "\n")
+
+
+def test_heartbeats_are_not_listed_as_file_changes(events_log):
+    """The reported bug: 288 heartbeats shown as one changed file called "-"
+    in a share called "(root)". They carry "-" as their path, so the
+    path-based exclude never saw them."""
+    import modules.web.app.main as m
+    _events(events_log, [(m_, "__heartbeat__", "-") for m_ in range(1, 30)])
+    out = m.build_changes("day")
+    assert out["rows"] == []
+    assert out["total"] == 0
+
+
+def test_watcher_restart_gaps_are_not_file_changes(events_log):
+    import modules.web.app.main as m
+    _events(events_log, [(5, "__gap__", "-")])
+    assert m.build_changes("day")["rows"] == []
+
+
+def test_real_changes_still_appear_alongside_bookkeeping(events_log):
+    """The filter must remove only the bookkeeping, not the activity around
+    it — the heartbeats are interleaved with genuine events in the real log."""
+    import modules.web.app.main as m
+    _events(events_log, [
+        (10, "__heartbeat__", "-"),
+        (9,  "create", "/mnt/primary/photo/holiday.jpg"),
+        (8,  "__heartbeat__", "-"),
+        (7,  "modify", "/mnt/primary/music/track.flac"),
+        (6,  "__gap__", "watcher started"),
+    ])
+    items = m.build_changes("day")["rows"]
+    assert {i["rel"] for i in items} == {"holiday.jpg", "track.flac"}
+    assert {i["share"] for i in items} == {"photo", "music"}
+    assert all(i["op"] in ("create", "modify") for i in items)
+
+
+def test_manifest_and_trash_paths_are_still_excluded(events_log):
+    """The pre-existing path-based exclude must survive the new op filter."""
+    import modules.web.app.main as m
+    _events(events_log, [
+        (5, "modify", "/mnt/primary/.nase/integrity.db"),
+        (4, "create", "/mnt/backup_daily/.trash/2026-01-01/old.txt"),
+        (3, "create", "/mnt/primary/video/real.mkv"),
+    ])
+    items = m.build_changes("day")["rows"]
+    assert [i["rel"] for i in items] == ["real.mkv"]

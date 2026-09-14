@@ -555,6 +555,17 @@ def read_log(job: str | None, lines: int = 80) -> list[dict]:
 # days, so old entries can linger).
 _CHANGES_EXCLUDE_RE = re.compile(r"^/mnt/[^/]+/\.(nase|trash)(/|$)")
 
+# Bookkeeping the watcher writes about itself, not file activity: __heartbeat__
+# proves nase-primary-watch is still alive (lib/watch.sh reads it to decide
+# whether the event log can vouch for a window) and __gap__ marks a restart.
+#
+# Both carry "-" as their path, so the path-based exclude above cannot see
+# them — which is how 288 heartbeats came to be listed as a single changed file
+# called "-" in a share called "(root)", and counted as "1 file" (backlog #39).
+# The status report had the identical bug and was fixed under #29; this reader
+# was missed at the time, so the filter goes in by operation on both sides now.
+_CHANGES_EXCLUDE_OPS = frozenset({"__heartbeat__", "__gap__"})
+
 def build_changes(window: str = "day", page: int = 1, group: bool = False) -> dict:
     secs = _WINDOW_SECS.get(window, 86400)
     since_str = datetime.fromtimestamp(datetime.now().timestamp() - secs).strftime("%Y-%m-%d %H:%M:%S")
@@ -573,6 +584,8 @@ def build_changes(window: str = "day", page: int = 1, group: bool = False) -> di
             continue
         ts, op, path = parts
         if ts < since_str:
+            continue
+        if op in _CHANGES_EXCLUDE_OPS:
             continue
         if _CHANGES_EXCLUDE_RE.match(path):
             continue
