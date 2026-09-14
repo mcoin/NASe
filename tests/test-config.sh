@@ -111,4 +111,52 @@ assert_exit0 "config_bool: true value"  config_bool '.drives[0].active'
 assert_exit1 "config_bool: false value" config_bool '.services.filebrowser.enabled'
 assert_exit1 "config_bool: absent key"  config_bool '.does.not.exist'
 
+# ── The flat-map cache (backlog #24, item 3) ─────────────────────────────────
+# The whole file is parsed once by a single `yq -o=props` and the accessors are
+# string lookups after that. These pin the properties that make the swap safe.
+
+# Defaults. yq's `a // b` yields b when a is null *or false* — not merely when
+# absent — and that is reproduced rather than corrected, because this was a
+# behaviour-preserving change. The one place it bites is tracked separately.
+assert_eq "default used for an absent key" "fallback" \
+    "$(config_get '.does.not.exist // "fallback"')"
+assert_eq "default not used when a value is present" "testhost" \
+    "$(config_get '.nas.hostname // "fallback"')"
+assert_eq "an unquoted numeric default works" "10" \
+    "$(config_get '.does.not.exist // 10')"
+assert_eq "a default containing spaces survives" "Sat *-*-* 03:00:00" \
+    "$(config_get '.does.not.exist // "Sat *-*-* 03:00:00"')"
+assert_eq "yq semantics: false falls back to the default" "true" \
+    "$(config_get '.services.filebrowser.enabled // "true"')"
+assert_eq "but without a default, false is false" "false" \
+    "$(config_get '.services.filebrowser.enabled')"
+
+# Values that a naive "key = value" split would mangle.
+assert_eq "a value containing a space is not truncated" "*-*-* 03:00:00" \
+    "$(config_get '.sync_jobs[0].schedule')"
+
+# The cache is keyed on the file's identity, so a config edited mid-run is
+# picked up rather than served stale from the first parse.
+CFG_COPY=$(mktemp --suffix=.yaml)
+printf 'nas:\n  hostname: first\n' > "$CFG_COPY"
+( CONFIG_FILE="$CFG_COPY"
+  source "${REPO_ROOT}/lib/config.sh"
+  assert_eq "reads the file it was pointed at" "first" "$(config_get '.nas.hostname')"
+  sleep 1
+  printf 'nas:\n  hostname: second\n' > "$CFG_COPY"
+  assert_eq "notices the file changing underneath it" "second" "$(config_get '.nas.hostname')" )
+
+rm -f "$CFG_COPY"
+
+# The cache has to be built in the *caller's* shell, not lazily on first use.
+# Essentially every call site is `x=$(config_get ...)`, which runs in a
+# subshell: a cache populated there dies with it, so a lazily built one would
+# be rebuilt on every call and end up slower than the per-field yq it replaced.
+# Asserting it is already populated here, before any accessor has been called
+# in this shell, is what pins that down.
+assert_exit0 "the cache is populated at source time" \
+    test "${#_CONFIG_CACHE[@]}" -gt 0
+assert_eq "a subshell inherits the populated cache" "testhost" \
+    "$(printf '%s' "${_CONFIG_CACHE[nas.hostname]}")"
+
 test_summary
