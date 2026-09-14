@@ -156,13 +156,35 @@ def load_config() -> dict:
 def _run(*cmd: str) -> subprocess.CompletedProcess:
     return subprocess.run(list(cmd), capture_output=True, text=True)
 
-def schedule_slug(schedule: str) -> str:
-    """Unit-name fragment for a schedule's sync group.
+# Written by modules/sync/setup.sh into each group timer's Description.
+_SYNC_GROUP_DESC = "NASe sync group timer: "
 
-    Must stay identical to schedule_slug() in lib/config.sh, which is what
-    actually names the units on disk — this side only reads them back.
+def sync_group_units() -> dict[str, str]:
+    """schedule string -> group timer unit name, as systemd actually has them.
+
+    This used to be a schedule_slug() reimplemented here to match the one in
+    lib/config.sh, with tests/test-sync-group.sh asserting the two agreed —
+    a parity test between two implementations of one function being a fairly
+    loud statement that the seam was in the wrong place (backlog #24 item 4).
+
+    The shell names these units, and stamps the schedule verbatim into each
+    unit's Description. Reading the mapping back out of systemd means the
+    algorithm lives in exactly one place: whatever the shell actually created
+    is what is found here, so the two cannot drift.
     """
-    return re.sub(r"[^a-z0-9]+", "-", schedule.lower()).strip("-")
+    out = _run("systemctl", "show", "--property=Id", "--property=Description",
+               "nase-sync-group-*.timer")
+    mapping: dict[str, str] = {}
+    # One block per unit, separated by blank lines; property order is not
+    # guaranteed, so collect a block before interpreting it.
+    for block in out.stdout.split("\n\n"):
+        fields = dict(
+            line.split("=", 1) for line in block.splitlines() if "=" in line
+        )
+        unit, desc = fields.get("Id", "").strip(), fields.get("Description", "").strip()
+        if unit and desc.startswith(_SYNC_GROUP_DESC):
+            mapping[desc[len(_SYNC_GROUP_DESC):]] = unit
+    return mapping
 
 def unit_active(unit: str) -> str:
     return _run("systemctl", "is-active", unit).stdout.strip() or "unknown"
@@ -248,6 +270,13 @@ _SPIN_SAMPLE_INTERVAL_SECS = 300
 # long silence (sampler disabled, drive removed) shouldn't be drawn over.
 _SPIN_STALE_AFTER_SECS = _SPIN_SAMPLE_INTERVAL_SECS * 3
 
+# The prefix of spin-history.log's columns this reader actually needs. The file
+# is written by modules/drives/spin_sample.sh, which documents the full field
+# list in its header; tests/web/test_app.py asserts the two still agree, so a
+# column added or reordered there fails a test instead of silently emptying the
+# Monitoring tab.
+_SPIN_FIELDS_REQUIRED = ("epoch", "drive", "state", "method")
+
 def _read_spin_history() -> dict[str, list[tuple[int, str, str]]]:
     """drive name -> chronological (epoch, state, wake_reason) samples, oldest first.
 
@@ -268,18 +297,23 @@ def _read_spin_history() -> dict[str, list[tuple[int, str, str]]]:
     per_drive: dict[str, list[tuple[int, str, str]]] = {}
     for line in lines:
         parts = line.split("\t")
-        # Accept the current 6-field format and the older 5- and 4-field ones
-        # (no I/O delta, no reason column) so pre-upgrade entries still render.
-        io_delta = "-"
-        if len(parts) == 6:
-            ts_str, name, state, _method, reason, io_delta = parts
-        elif len(parts) == 5:
-            ts_str, name, state, _method, reason = parts
-        elif len(parts) == 4:
-            ts_str, name, state, _method = parts
-            reason = "-"
-        else:
+        # Positional, with a minimum rather than an exact match on the field
+        # count (backlog #24 item 4). The ladder this replaces listed 6, 5 and
+        # 4 explicitly, which meant adding a seventh field to spin_sample.sh
+        # without editing here would make every line fall through to `continue`
+        # and blank the Monitoring tab — a silent, total failure for an
+        # additive change. That nearly happened in c3f2d3d, where the I/O
+        # column had to be added to both sides in one commit.
+        #
+        # Fields, in the order spin_sample.sh writes them:
+        #   0 epoch  1 drive  2 state  3 method  4 reason  5 io_delta
+        # Anything beyond is ignored here rather than rejected, so the writer
+        # can grow without this having to know.
+        if len(parts) < len(_SPIN_FIELDS_REQUIRED):
             continue
+        ts_str, name, state = parts[0], parts[1], parts[2]
+        reason   = parts[4] if len(parts) > 4 else "-"
+        io_delta = parts[5] if len(parts) > 5 else "-"
         try:
             ts = int(ts_str)
         except ValueError:
@@ -457,13 +491,19 @@ def build_status(cfg: dict) -> dict:
             "ago":     ago,
         })
 
+    # Looked up once for all jobs rather than derived per job — see
+    # sync_group_units for why this is discovered rather than computed.
+    groups = sync_group_units()
     for job in cfg.get("sync_jobs", []):
         name      = job["name"]
         # Jobs no longer carry their own timer: one group timer per distinct
         # schedule runs them in sequence (backlog #4 phase 2 option C), so the
         # next-trigger shown against a job is its group's.
-        unit      = f"nase-sync-group-{schedule_slug(job.get('schedule', ''))}.timer"
-        state     = unit_active(unit)
+        unit      = groups.get(job.get("schedule", ""), "")
+        # No group timer for this schedule means apply.sh has not run since the
+        # job was added. "inactive" is what the old code reported for that, via
+        # systemctl on a unit name it had computed but that did not exist.
+        state     = unit_active(unit) if unit else "inactive"
         last, ago = stamp_info(name)
         next_dt, next_in = unit_next(unit) if state == "active" else ("—", None)
         timers.append({

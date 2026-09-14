@@ -135,16 +135,19 @@ assert_eq "attribution: names the most recent start"         "jobC" "$(pick 305 
 assert_empty "attribution: silent when nothing ran in window"        "$(pick 1000 50)"
 assert_empty "attribution: silent when window excludes the start"    "$(pick 250 10)"
 
-# ── schedule_slug: shell and Python must agree ────────────────────────────────
-# lib/config.sh names the units; main.py reads those names back to show a job's
-# next trigger. If they ever disagreed the dashboard would silently show "—".
+# ── schedule_slug ─────────────────────────────────────────────────────────────
+# There used to be a parity loop here asserting that this function and a
+# reimplementation of it in main.py produced the same string, because the shell
+# names the units and the dashboard recomputed the name to read them back. That
+# second implementation is gone: main.py now discovers the mapping from the
+# Description systemd actually has (backlog #24 item 4), so there is one
+# implementation and nothing to keep in step.
 echo ""
-echo "=== schedule_slug parity ==="
-for s in '*-*-* 03:00:00' 'Mon *-*-* 04:00' 'daily' 'Mon,Thu *-*-* 02:30:00' '  *-*-* 05:00:00  '; do
-    b=$(schedule_slug "$s")
-    p=$(python3 -c "import re,sys; print(re.sub(r'[^a-z0-9]+','-',sys.argv[1].lower()).strip('-'))" "$s")
-    assert_eq "slug parity: '${s}'" "$p" "$b"
-done
-assert_eq "slug of the live 03:00 schedule" "03-00-00" "$(schedule_slug '*-*-* 03:00:00')"
+echo "=== schedule_slug ==="
+assert_eq "collapses punctuation to single dashes" "03-00-00" "$(schedule_slug '*-*-* 03:00:00')"
+assert_eq "lowercases"                             "mon-04-00" "$(schedule_slug 'Mon *-*-* 04:00')"
+assert_eq "leaves a bare word alone"               "daily"     "$(schedule_slug 'daily')"
+assert_eq "collapses a comma list"                 "mon-thu-02-30-00" "$(schedule_slug 'Mon,Thu *-*-* 02:30:00')"
+assert_eq "trims leading and trailing dashes"      "05-00-00"  "$(schedule_slug '  *-*-* 05:00:00  ')"
 
 test_summary

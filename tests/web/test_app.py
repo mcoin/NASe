@@ -1770,3 +1770,121 @@ def test_a_malformed_report_is_skipped_not_fatal(client, auth_headers, reports_d
 
 def test_reports_appear_in_the_nav(client):
     assert 'href="/reports"' in client.get("/").text
+
+
+# ── Sync group timers are discovered, not recomputed (#24 item 4) ──────────────
+
+def _systemctl_show(units):
+    """Stand in for _run, returning systemctl show output for the given
+    {unit: description} mapping — blocks separated by blank lines."""
+    import subprocess
+    blocks = "\n\n".join(f"Id={u}\nDescription={d}" for u, d in units.items())
+    def fake(*args):
+        return subprocess.CompletedProcess(list(args), 0, blocks, "")
+    return fake
+
+
+def test_sync_groups_read_the_schedule_from_systemd(monkeypatch):
+    """The schedule is stamped into each timer's Description by the shell that
+    names the unit, so reading it back cannot drift from the naming."""
+    import modules.web.app.main as m
+    monkeypatch.setattr(m, "_run", _systemctl_show({
+        "nase-sync-group-03-00-00.timer": "NASe sync group timer: *-*-* 03:00:00",
+        "nase-sync-group-05-30-00.timer": "NASe sync group timer: *-*-* 05:30:00",
+    }))
+    assert m.sync_group_units() == {
+        "*-*-* 03:00:00": "nase-sync-group-03-00-00.timer",
+        "*-*-* 05:30:00": "nase-sync-group-05-30-00.timer",
+    }
+
+
+def test_sync_groups_ignore_unrelated_units(monkeypatch):
+    import modules.web.app.main as m
+    monkeypatch.setattr(m, "_run", _systemctl_show({
+        "nase-monitor.timer": "NASe SMART health check",
+        "nase-sync-group-03-00-00.timer": "NASe sync group timer: *-*-* 03:00:00",
+    }))
+    assert m.sync_group_units() == {"*-*-* 03:00:00": "nase-sync-group-03-00-00.timer"}
+
+
+def test_sync_groups_tolerate_reversed_property_order(monkeypatch):
+    """systemctl show does not promise an order for the properties asked for."""
+    import subprocess
+    import modules.web.app.main as m
+    blocks = ("Description=NASe sync group timer: *-*-* 03:00:00\n"
+              "Id=nase-sync-group-03-00-00.timer")
+    monkeypatch.setattr(m, "_run",
+                        lambda *a: subprocess.CompletedProcess(list(a), 0, blocks, ""))
+    assert m.sync_group_units() == {"*-*-* 03:00:00": "nase-sync-group-03-00-00.timer"}
+
+
+def test_sync_groups_empty_when_nothing_installed(monkeypatch):
+    import subprocess
+    import modules.web.app.main as m
+    monkeypatch.setattr(m, "_run", lambda *a: subprocess.CompletedProcess(list(a), 1, "", ""))
+    assert m.sync_group_units() == {}
+
+
+def test_a_job_with_no_group_timer_reads_as_inactive(monkeypatch, config_file):
+    """What apply.sh-not-yet-run looks like. The old code computed a unit name
+    that did not exist and systemctl answered "inactive"; this must not become
+    a crash or a blank now that the name is looked up instead."""
+    import modules.web.app.main as m
+    monkeypatch.setattr(m, "CONFIG_FILE", config_file)
+    monkeypatch.setattr(m, "sync_group_units", lambda: {})
+    timers = m.build_status(m.load_config())["timers"]
+    jobs = [t for t in timers if t["name"] != "config-archive"]
+    assert jobs, "expected the test config to define sync jobs"
+    assert all(t["state"] == "inactive" for t in jobs)
+    assert all(t["next"] == "—" for t in jobs)
+
+
+# ── spin-history.log: writer and reader must agree (#24 item 4) ────────────────
+
+def test_spin_history_reader_tolerates_a_new_column():
+    """The drift that used to be fatal. The old parser matched the field count
+    exactly, so adding a column to spin_sample.sh without editing main.py made
+    every line fall through and blanked the Monitoring tab — a silent, total
+    failure for a purely additive change."""
+    import modules.web.app.main as m
+    from pathlib import Path
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        log = Path(d) / "spin-history.log"
+        log.write_text("100\tprimary\tactive\testimated\twoke\t7\tsomething-new\n")
+        orig, m.SPIN_HISTORY_LOG = m.SPIN_HISTORY_LOG, log
+        try:
+            out = m._read_spin_history()
+        finally:
+            m.SPIN_HISTORY_LOG = orig
+    assert out["primary"][0][1] == "active"
+    assert "7 block requests" in out["primary"][0][2]
+
+
+def test_spin_history_writer_and_reader_agree_on_the_columns():
+    """One definition, checked across the language boundary.
+
+    modules/drives/spin_sample.sh writes the file and documents its columns;
+    main.py reads it positionally. Nothing at runtime couples them, so this
+    asserts the writer still emits at least the prefix the reader indexes into,
+    in the order the reader assumes."""
+    sampler = (REPO_ROOT / "modules/drives/spin_sample.sh").read_text()
+
+    # The single printf that writes a sample line.
+    fmt = re.search(r"printf '((?:%s\\t)+%s\\n)'", sampler)
+    assert fmt, "could not find the sample-writing printf in spin_sample.sh"
+    written = fmt.group(1).count("%s")
+
+    import modules.web.app.main as m
+    assert written >= len(m._SPIN_FIELDS_REQUIRED), (
+        f"spin_sample.sh writes {written} fields but the reader indexes "
+        f"{len(m._SPIN_FIELDS_REQUIRED)}")
+
+    # And the documented order in the sampler's header is the order the reader
+    # relies on, so a reordering there is caught here rather than by a wrong
+    # timeline on the dashboard.
+    header = sampler[:sampler.index("set -euo pipefail")]
+    documented = re.search(r'"(<epoch>[^"]*)"', header)
+    assert documented, "spin_sample.sh no longer documents its line format"
+    names = documented.group(1).split(r"\t")
+    assert [n.strip("<>") for n in names[:3]] == ["epoch", "drive", "state"], names
