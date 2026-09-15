@@ -178,16 +178,16 @@ def auth_headers():
 @pytest.fixture()
 def client(config_file, stamp_dir, log_dir, backlog_file, monkeypatch):
     """TestClient with patched paths, auth, and a fake _run (no systemctl calls)."""
-    import modules.web.app.main as m
+    from modules.web.app import core, main
     from fastapi.testclient import TestClient
 
-    monkeypatch.setattr(m, "CONFIG_FILE", config_file)
-    monkeypatch.setattr(m, "STAMP_DIR", stamp_dir)
-    monkeypatch.setattr(m, "BACKLOG_FILE", backlog_file)
-    monkeypatch.setattr(m, "LOG_DIR", log_dir)
-    monkeypatch.setattr(m, "CENTRAL_LOG", log_dir / "nase.log")
-    monkeypatch.setattr(m, "_WEB_USERNAME", TEST_USER)
-    monkeypatch.setattr(m, "_WEB_PASSWORD", TEST_PASS)
+    monkeypatch.setattr(core, "CONFIG_FILE", config_file)
+    monkeypatch.setattr(core, "STAMP_DIR", stamp_dir)
+    monkeypatch.setattr(core, "BACKLOG_FILE", backlog_file)
+    monkeypatch.setattr(core, "LOG_DIR", log_dir)
+    monkeypatch.setattr(core, "CENTRAL_LOG", log_dir / "nase.log")
+    monkeypatch.setattr(core, "_WEB_USERNAME", TEST_USER)
+    monkeypatch.setattr(core, "_WEB_PASSWORD", TEST_PASS)
 
     def fake_run(*cmd):
         r = MagicMock()
@@ -195,8 +195,8 @@ def client(config_file, stamp_dir, log_dir, backlog_file, monkeypatch):
         r.stdout = "inactive\n"
         return r
 
-    monkeypatch.setattr(m, "_run", fake_run)
-    return TestClient(m.app, raise_server_exceptions=True)
+    monkeypatch.setattr(core, "_run", fake_run)
+    return TestClient(main.app, raise_server_exceptions=True)
 
 
 @pytest.fixture()
@@ -240,14 +240,14 @@ integrity:
 def integrity_client(integrity_config_file, stamp_dir, log_dir, monkeypatch):
     """TestClient pointed at integrity_config_file (integrity enabled, one
     active drive with a real mountpoint under tmp_path)."""
-    import modules.web.app.main as m
+    from modules.web.app import core, main
     from fastapi.testclient import TestClient
 
-    monkeypatch.setattr(m, "CONFIG_FILE", integrity_config_file)
-    monkeypatch.setattr(m, "STAMP_DIR", stamp_dir)
-    monkeypatch.setattr(m, "LOG_DIR", log_dir)
-    monkeypatch.setattr(m, "CENTRAL_LOG", log_dir / "nase.log")
-    monkeypatch.setattr(m, "_WEB_USERNAME", TEST_USER)
-    monkeypatch.setattr(m, "_WEB_PASSWORD", TEST_PASS)
+    monkeypatch.setattr(core, "CONFIG_FILE", integrity_config_file)
+    monkeypatch.setattr(core, "STAMP_DIR", stamp_dir)
+    monkeypatch.setattr(core, "LOG_DIR", log_dir)
+    monkeypatch.setattr(core, "CENTRAL_LOG", log_dir / "nase.log")
+    monkeypatch.setattr(core, "_WEB_USERNAME", TEST_USER)
+    monkeypatch.setattr(core, "_WEB_PASSWORD", TEST_PASS)
 
-    return TestClient(m.app, raise_server_exceptions=True)
+    return TestClient(main.app, raise_server_exceptions=True)

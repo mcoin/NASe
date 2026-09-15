@@ -19,13 +19,13 @@ REPO_ROOT_BACKLOG = Path("/var/lib/nase/backlog.json")
 # ── read_log ───────────────────────────────────────────────────────────────────
 
 def test_read_log_missing_returns_empty(tmp_path, monkeypatch):
-    import modules.web.app.main as m
-    monkeypatch.setattr(m, "CENTRAL_LOG", tmp_path / "nonexistent.log")
-    assert m.read_log(None) == []
+    from modules.web.app import core, system
+    monkeypatch.setattr(core, "CENTRAL_LOG", tmp_path / "nonexistent.log")
+    assert system.read_log(None) == []
 
 
 def test_read_log_line_classification(tmp_path, monkeypatch):
-    import modules.web.app.main as m
+    from modules.web.app import core, system
     log = tmp_path / "nase.log"
     log.write_text(
         "[OK   ] success\n"
@@ -34,52 +34,52 @@ def test_read_log_line_classification(tmp_path, monkeypatch):
         "[-----] section\n"
         "plain info\n"
     )
-    monkeypatch.setattr(m, "CENTRAL_LOG", log)
-    lines = m.read_log(None)
+    monkeypatch.setattr(core, "CENTRAL_LOG", log)
+    lines = system.read_log(None)
     assert [ln["cls"] for ln in lines] == [
         "log-ok", "log-warn", "log-err", "log-section", "log-info"
     ]
 
 
 def test_read_log_tail_limits_lines(tmp_path, monkeypatch):
-    import modules.web.app.main as m
+    from modules.web.app import core, system
     log = tmp_path / "nase.log"
     log.write_text("\n".join(f"line {i}" for i in range(100)) + "\n")
-    monkeypatch.setattr(m, "CENTRAL_LOG", log)
-    lines = m.read_log(None, lines=10)
+    monkeypatch.setattr(core, "CENTRAL_LOG", log)
+    lines = system.read_log(None, lines=10)
     assert len(lines) == 10
     assert lines[-1]["text"] == "line 99"
 
 
 def test_read_log_strips_trailing_newline(tmp_path, monkeypatch):
-    import modules.web.app.main as m
+    from modules.web.app import core, system
     log = tmp_path / "nase.log"
     log.write_text("hello world\n")
-    monkeypatch.setattr(m, "CENTRAL_LOG", log)
-    assert m.read_log(None)[0]["text"] == "hello world"
+    monkeypatch.setattr(core, "CENTRAL_LOG", log)
+    assert system.read_log(None)[0]["text"] == "hello world"
 
 
 def test_read_log_missing_job_returns_empty():
-    import modules.web.app.main as m
+    from modules.web.app import system
     # /var/log/nase-sync-no-such-job.log won't exist in test environment
-    assert m.read_log("no-such-job-xyz") == []
+    assert system.read_log("no-such-job-xyz") == []
 
 
 # ── stamp_info ─────────────────────────────────────────────────────────────────
 
 def test_stamp_info_missing_returns_never(tmp_path, monkeypatch):
-    import modules.web.app.main as m
-    monkeypatch.setattr(m, "STAMP_DIR", tmp_path)
-    dt, ago = m.stamp_info("nojob")
+    from modules.web.app import core, system
+    monkeypatch.setattr(core, "STAMP_DIR", tmp_path)
+    dt, ago = system.stamp_info("nojob")
     assert dt == "never"
     assert ago is None
 
 
 def test_stamp_info_existing_stamp(tmp_path, monkeypatch):
-    import modules.web.app.main as m
-    monkeypatch.setattr(m, "STAMP_DIR", tmp_path)
+    from modules.web.app import core, system
+    monkeypatch.setattr(core, "STAMP_DIR", tmp_path)
     (tmp_path / "sync-myjob.stamp").touch()
-    dt, ago = m.stamp_info("myjob")
+    dt, ago = system.stamp_info("myjob")
     assert dt != "never"
     assert ago is not None
     assert "ago" in ago
@@ -88,25 +88,25 @@ def test_stamp_info_existing_stamp(tmp_path, monkeypatch):
 # ── _section_to_yaml / _save_section ──────────────────────────────────────────
 
 def test_section_to_yaml_produces_valid_yaml():
-    import modules.web.app.main as m
+    from modules.web.app import configedit
     value = {"hostname": "test-nas", "port": 8088}
-    text = m._section_to_yaml(value)
+    text = configedit._section_to_yaml(value)
     assert yaml.safe_load(text) == value
 
 
 def test_save_section_updates_target_key(config_file, monkeypatch):
-    import modules.web.app.main as m
-    monkeypatch.setattr(m, "CONFIG_FILE", config_file)
-    m._save_section("nas", "hostname: updated-nas\n")
+    from modules.web.app import configedit, core
+    monkeypatch.setattr(core, "CONFIG_FILE", config_file)
+    configedit._save_section("nas", "hostname: updated-nas\n")
     result = yaml.safe_load(config_file.read_text())
     assert result["nas"]["hostname"] == "updated-nas"
 
 
 def test_save_section_preserves_other_sections(config_file, monkeypatch):
-    import modules.web.app.main as m
-    monkeypatch.setattr(m, "CONFIG_FILE", config_file)
+    from modules.web.app import configedit, core
+    monkeypatch.setattr(core, "CONFIG_FILE", config_file)
     original = yaml.safe_load(config_file.read_text())
-    m._save_section("nas", "hostname: new-name\n")
+    configedit._save_section("nas", "hostname: new-name\n")
     result = yaml.safe_load(config_file.read_text())
     assert result["drives"] == original["drives"]
     assert result["sync_jobs"] == original["sync_jobs"]
@@ -315,20 +315,20 @@ def test_apply_all_streams_sse(client, auth_headers):
 # ── drive_integrity_info / build_integrity ──────────────────────────────────────
 
 def test_drive_integrity_info_no_manifest(tmp_path):
-    import modules.web.app.main as m
-    info = m.drive_integrity_info("drive1", str(tmp_path / "nope"))
+    from modules.web.app import changes
+    info = changes.drive_integrity_info("drive1", str(tmp_path / "nope"))
     assert info == {"name": "drive1", "mountpoint": str(tmp_path / "nope"), "has_manifest": False}
 
 
 def test_drive_integrity_info_empty_mountpoint():
-    import modules.web.app.main as m
-    info = m.drive_integrity_info("drive1", "")
+    from modules.web.app import changes
+    info = changes.drive_integrity_info("drive1", "")
     assert info["has_manifest"] is False
 
 
 def test_drive_integrity_info_counts_and_discovery(tmp_path, stamp_dir, monkeypatch):
-    import modules.web.app.main as m
-    monkeypatch.setattr(m, "STAMP_DIR", stamp_dir)
+    from modules.web.app import changes, core
+    monkeypatch.setattr(core, "STAMP_DIR", stamp_dir)
     mountpoint = tmp_path / "drive1"
     now = int(time.time())
     make_integrity_cache(
@@ -340,7 +340,7 @@ def test_drive_integrity_info_counts_and_discovery(tmp_path, stamp_dir, monkeypa
         ],
         meta={"discovery_complete": "false", "discovery_total": "6", "drive_uuid": "x"},
     )
-    info = m.drive_integrity_info("drive1", str(mountpoint))
+    info = changes.drive_integrity_info("drive1", str(mountpoint))
     assert info["has_manifest"] is True
     assert info["total"] == 3
     assert info["ok"] == 2
@@ -351,18 +351,18 @@ def test_drive_integrity_info_counts_and_discovery(tmp_path, stamp_dir, monkeypa
 
 
 def test_drive_integrity_info_discovery_complete_has_no_pct(tmp_path, stamp_dir, monkeypatch):
-    import modules.web.app.main as m
-    monkeypatch.setattr(m, "STAMP_DIR", stamp_dir)
+    from modules.web.app import changes, core
+    monkeypatch.setattr(core, "STAMP_DIR", stamp_dir)
     mountpoint = tmp_path / "drive1"
     make_integrity_cache(stamp_dir, mountpoint, meta={"discovery_complete": "true"})
-    info = m.drive_integrity_info("drive1", str(mountpoint))
+    info = changes.drive_integrity_info("drive1", str(mountpoint))
     assert info["discovery_complete"] is True
     assert info["discovery_pct"] is None
 
 
 def test_drive_integrity_info_flagged_rows_include_event_detail(tmp_path, stamp_dir, monkeypatch):
-    import modules.web.app.main as m
-    monkeypatch.setattr(m, "STAMP_DIR", stamp_dir)
+    from modules.web.app import changes, core
+    monkeypatch.setattr(core, "STAMP_DIR", stamp_dir)
     mountpoint = tmp_path / "drive1"
     now = int(time.time())
     make_integrity_cache(
@@ -371,7 +371,7 @@ def test_drive_integrity_info_flagged_rows_include_event_detail(tmp_path, stamp_
         events=[("bad.txt", "mismatch", "expected aaa got zzz")],
         meta={"discovery_complete": "true"},
     )
-    info = m.drive_integrity_info("drive1", str(mountpoint))
+    info = changes.drive_integrity_info("drive1", str(mountpoint))
     assert len(info["flagged_rows"]) == 1
     row = info["flagged_rows"][0]
     assert row["path"] == "bad.txt"
@@ -380,8 +380,8 @@ def test_drive_integrity_info_flagged_rows_include_event_detail(tmp_path, stamp_
 
 
 def test_drive_integrity_info_flagged_rows_only_ok_excluded(tmp_path, stamp_dir, monkeypatch):
-    import modules.web.app.main as m
-    monkeypatch.setattr(m, "STAMP_DIR", stamp_dir)
+    from modules.web.app import changes, core
+    monkeypatch.setattr(core, "STAMP_DIR", stamp_dir)
     mountpoint = tmp_path / "drive1"
     now = int(time.time())
     make_integrity_cache(
@@ -389,17 +389,17 @@ def test_drive_integrity_info_flagged_rows_only_ok_excluded(tmp_path, stamp_dir,
         rows=[("good.txt", 10, now, "aaa", "ok", now)],
         meta={"discovery_complete": "true"},
     )
-    info = m.drive_integrity_info("drive1", str(mountpoint))
+    info = changes.drive_integrity_info("drive1", str(mountpoint))
     assert info["flagged_rows"] == []
 
 
 def test_build_integrity_disabled_by_default():
-    import modules.web.app.main as m
-    assert m.build_integrity({}) == {"enabled": False, "drives": []}
+    from modules.web.app import changes
+    assert changes.build_integrity({}) == {"enabled": False, "drives": []}
 
 
 def test_build_integrity_excludes_inactive_drives(tmp_path):
-    import modules.web.app.main as m
+    from modules.web.app import changes
     cfg = {
         "integrity": {"enabled": True},
         "drives": [
@@ -407,7 +407,7 @@ def test_build_integrity_excludes_inactive_drives(tmp_path):
             {"name": "b", "mountpoint": str(tmp_path / "b"), "active": False},
         ],
     }
-    result = m.build_integrity(cfg)
+    result = changes.build_integrity(cfg)
     assert result["enabled"] is True
     assert [d["name"] for d in result["drives"]] == ["a"]
 
@@ -505,9 +505,9 @@ def _titles(view):
 
 
 def test_backlog_view_active_spans_open_ready_and_in_progress(backlog_file, client):
-    import modules.web.app.main as m
+    from modules.web.app import backlog
     write_backlog(backlog_file, SAMPLE_BACKLOG)
-    assert _titles(m.backlog_view("active", "all")) == [
+    assert _titles(backlog.backlog_view("active", "all")) == [
         "an open one", "a ready one", "an in-progress one"]
 
 
@@ -515,39 +515,39 @@ def test_backlog_view_in_progress_is_visible_in_default_view(backlog_file, clien
     # The regression this guards is silent rather than loud: leaving
     # "in_progress" out of _BACKLOG_ACTIVE_STATUSES doesn't raise, it just
     # hides every ticket someone is actually working on from the default view.
-    import modules.web.app.main as m
+    from modules.web.app import backlog
     write_backlog(backlog_file, SAMPLE_BACKLOG)
-    assert m.backlog_view(m._BACKLOG_DEFAULT_FILTER, "all")["status"] == "active"
-    assert "an in-progress one" in _titles(m.backlog_view("active", "all"))
-    assert _titles(m.backlog_view("in_progress", "all")) == ["an in-progress one"]
+    assert backlog.backlog_view(backlog._BACKLOG_DEFAULT_FILTER, "all")["status"] == "active"
+    assert "an in-progress one" in _titles(backlog.backlog_view("active", "all"))
+    assert _titles(backlog.backlog_view("in_progress", "all")) == ["an in-progress one"]
 
 
 def test_backlog_view_active_combines_with_type_filter(backlog_file, client):
-    import modules.web.app.main as m
+    from modules.web.app import backlog
     write_backlog(backlog_file, SAMPLE_BACKLOG)
-    assert _titles(m.backlog_view("active", "bug")) == ["an open one"]
+    assert _titles(backlog.backlog_view("active", "bug")) == ["an open one"]
 
 
 def test_backlog_view_all_still_excludes_deleted_only(backlog_file, client):
-    import modules.web.app.main as m
+    from modules.web.app import backlog
     write_backlog(backlog_file, SAMPLE_BACKLOG)
-    assert _titles(m.backlog_view("all", "all")) == [
+    assert _titles(backlog.backlog_view("all", "all")) == [
         "an open one", "a ready one", "an in-progress one", "a done one",
         "a closed one"]
 
 
 def test_backlog_view_unknown_status_falls_back_to_default(backlog_file, client):
-    import modules.web.app.main as m
+    from modules.web.app import backlog
     write_backlog(backlog_file, SAMPLE_BACKLOG)
-    view = m.backlog_view("bogus", "all")
+    view = backlog.backlog_view("bogus", "all")
     assert view["status"] == "active"
     assert _titles(view) == ["an open one", "a ready one", "an in-progress one"]
 
 
 def test_backlog_view_total_counts_undeleted_regardless_of_filter(backlog_file, client):
-    import modules.web.app.main as m
+    from modules.web.app import backlog
     write_backlog(backlog_file, SAMPLE_BACKLOG)
-    assert m.backlog_view("closed", "all")["total"] == 5
+    assert backlog.backlog_view("closed", "all")["total"] == 5
 
 
 def test_backlog_page_defaults_to_active(client, auth_headers, backlog_file):
@@ -661,8 +661,8 @@ def test_unauthenticated_htmx_request_gets_fragment_not_document(client):
 def test_missing_web_password_gets_its_own_message(client, monkeypatch, auth_headers):
     """A server with no WEB_PASSWORD is misconfigured, not a wrong password —
     telling the user to try again would be a dead end."""
-    import modules.web.app.main as m
-    monkeypatch.setattr(m, "_WEB_PASSWORD", "")
+    from modules.web.app import core
+    monkeypatch.setattr(core, "_WEB_PASSWORD", "")
     r = client.get("/config", headers={**HTML_ACCEPT, **auth_headers})
     assert r.status_code == 401
     assert "not configured" in r.text
@@ -673,8 +673,8 @@ def test_missing_web_password_gets_its_own_message(client, monkeypatch, auth_hea
 def test_error_page_renders_without_a_readable_config(client, monkeypatch):
     """The page chrome needs a hostname from config.yaml; an unreadable config
     is itself a plausible cause of an error, so it must not blow up here."""
-    import modules.web.app.main as m
-    monkeypatch.setattr(m, "CONFIG_FILE", "/nonexistent/config.yaml")
+    from modules.web.app import core
+    monkeypatch.setattr(core, "CONFIG_FILE", "/nonexistent/config.yaml")
     r = client.get("/config", headers=HTML_ACCEPT)
     assert r.status_code == 401
     assert "Sign-in required" in r.text
@@ -810,12 +810,12 @@ def test_save_section_keeps_the_header_of_the_following_section(config_file, mon
     """The bug: one Form-view save of sync_jobs deleted the whole comment block
     documenting `integrity:`, because ruamel had anchored it to the deepest last
     scalar of the sync_jobs subtree, which the save replaced wholesale."""
-    import modules.web.app.main as m
-    monkeypatch.setattr(m, "CONFIG_FILE", config_file)
+    from modules.web.app import configedit, core
+    monkeypatch.setattr(core, "CONFIG_FILE", config_file)
     config_file.write_text(CONFIG_WITH_SECTION_HEADER)
 
     # Form view marshals plain, comment-free YAML — nothing to restore from.
-    m._save_section("sync_jobs", "- name: data\n  source: /mnt/primary/data/\n")
+    configedit._save_section("sync_jobs", "- name: data\n  source: /mnt/primary/data/\n")
 
     text = config_file.read_text()
     assert "Checksum integrity manifest" in text
@@ -828,11 +828,11 @@ def test_save_section_keeps_the_header_of_the_following_section(config_file, mon
 def test_save_section_keeps_the_end_of_line_comment_on_the_last_leaf(config_file, monkeypatch):
     """Only the block after the first newline is re-anchored; the leaf's own
     trailing comment belongs to the value and must stay with it."""
-    import modules.web.app.main as m
-    monkeypatch.setattr(m, "CONFIG_FILE", config_file)
+    from modules.web.app import configedit, core
+    monkeypatch.setattr(core, "CONFIG_FILE", config_file)
     config_file.write_text(CONFIG_WITH_SECTION_HEADER)
 
-    m._save_section("nas", "hostname: renamed\n")
+    configedit._save_section("nas", "hostname: renamed\n")
 
     text = config_file.read_text()
     assert "retention_days: 30   # keep a month" in text
@@ -840,11 +840,11 @@ def test_save_section_keeps_the_end_of_line_comment_on_the_last_leaf(config_file
 
 
 def test_save_section_leaves_other_sections_comments_alone(config_file, monkeypatch):
-    import modules.web.app.main as m
-    monkeypatch.setattr(m, "CONFIG_FILE", config_file)
+    from modules.web.app import configedit, core
+    monkeypatch.setattr(core, "CONFIG_FILE", config_file)
     config_file.write_text(CONFIG_WITH_SECTION_HEADER)
 
-    m._save_section("services", "web:\n  enabled: false\n")
+    configedit._save_section("services", "web:\n  enabled: false\n")
 
     text = config_file.read_text()
     assert "Checksum integrity manifest" in text
@@ -857,12 +857,12 @@ def test_reanchor_is_byte_stable_on_the_real_config():
     file: loading the repo's own config.yaml, re-anchoring and dumping must
     reproduce it exactly."""
     import io
-    import modules.web.app.main as m
+    from modules.web.app import configedit
 
     src = (REPO_ROOT / "config.yaml").read_text()
-    ry = m._make_ryaml()
+    ry = configedit._make_ryaml()
     doc = ry.load(src)
-    m._reanchor_section_comments(doc)
+    configedit._reanchor_section_comments(doc)
     buf = io.StringIO()
     ry.dump(doc, buf)
     assert buf.getvalue() == src
@@ -870,10 +870,10 @@ def test_reanchor_is_byte_stable_on_the_real_config():
 
 def test_reanchor_survives_empty_and_scalar_sections():
     """Sections with nothing to descend into must not break the walk."""
-    import modules.web.app.main as m
-    ry = m._make_ryaml()
+    from modules.web.app import configedit
+    ry = configedit._make_ryaml()
     doc = ry.load("a: 1\nb: {}\nc: []\n\n# block\nd:\n  x: 1\n")
-    m._reanchor_section_comments(doc)   # must not raise
+    configedit._reanchor_section_comments(doc)   # must not raise
     assert list(doc.keys()) == ["a", "b", "c", "d"]
 
 
@@ -934,8 +934,8 @@ def test_existing_items_without_a_decision_still_load(client, auth_headers, back
 # ── unwrap_prose: rendering hard-wrapped text (#22) ─────────────────────────────
 
 def _unwrap(text):
-    import modules.web.app.main as m
-    return m.unwrap_prose(text)
+    from modules.web.app import configedit
+    return configedit.unwrap_prose(text)
 
 
 def test_unwrap_joins_a_hard_wrapped_paragraph():
@@ -1044,8 +1044,8 @@ WEBP_HEAD = b"RIFF" + b"\x00\x00\x00\x00" + b"WEBP" + b"\x00" * 40
 def attach_client(client, tmp_path, monkeypatch):
     """The client fixture with attachments redirected into tmp_path, so no test
     can write next to the real backlog."""
-    import modules.web.app.main as m
-    monkeypatch.setattr(m, "ATTACHMENT_DIR", tmp_path / "backlog-attachments")
+    from modules.web.app import backlog
+    monkeypatch.setattr(backlog, "ATTACHMENT_DIR", tmp_path / "backlog-attachments")
     return client
 
 
@@ -1109,23 +1109,23 @@ def test_attachment_rejects_svg(attach_client, auth_headers, backlog_file):
 
 
 def test_attachment_enforces_the_size_cap(attach_client, auth_headers, backlog_file):
-    import modules.web.app.main as m
+    from modules.web.app import backlog
     _one_item(backlog_file)
-    too_big = PNG_1PX + b"\x00" * (m.MAX_ATTACHMENT_BYTES + 1)
+    too_big = PNG_1PX + b"\x00" * (backlog.MAX_ATTACHMENT_BYTES + 1)
     r = _upload(attach_client, auth_headers, too_big)
     assert "err=too_big" in r.headers["location"]
     assert json.loads(backlog_file.read_text())["items"][0].get("attachments", []) == []
 
 
 def test_attachment_enforces_the_count_cap(attach_client, auth_headers, backlog_file):
-    import modules.web.app.main as m
+    from modules.web.app import backlog
     _one_item(backlog_file)
-    for _ in range(m.MAX_ATTACHMENTS_PER_ITEM):
+    for _ in range(backlog.MAX_ATTACHMENTS_PER_ITEM):
         _upload(attach_client, auth_headers, PNG_1PX)
     r = _upload(attach_client, auth_headers, PNG_1PX)
     assert "err=too_many" in r.headers["location"]
     assert len(json.loads(backlog_file.read_text())["items"][0]["attachments"]) == \
-        m.MAX_ATTACHMENTS_PER_ITEM
+        backlog.MAX_ATTACHMENTS_PER_ITEM
 
 
 def test_attachment_serving_requires_auth(attach_client, auth_headers, backlog_file):
@@ -1199,11 +1199,11 @@ def test_missing_attachment_file_is_a_404_not_a_crash(attach_client, auth_header
 # ── Spin history parsing (#4) ───────────────────────────────────────────────────
 
 def _spin_history(tmp_path, monkeypatch, text):
-    import modules.web.app.main as m
+    from modules.web.app import core, system
     log = tmp_path / "spin-history.log"
     log.write_text(text)
-    monkeypatch.setattr(m, "SPIN_HISTORY_LOG", log)
-    return m._read_spin_history()
+    monkeypatch.setattr(core, "SPIN_HISTORY_LOG", log)
+    return system._read_spin_history()
 
 
 def test_spin_history_reads_io_delta_into_the_reason(tmp_path, monkeypatch):
@@ -1422,10 +1422,11 @@ BETA_NOTE  = "beta only exists because of the odd camera export"
 GAMMA_NOTE = "gamma is the slow one"
 
 
-def _save_jobs(m, config_file, *jobs):
+def _save_jobs(config_file, *jobs):
     """Marshal jobs the way the Form view does: plain YAML, no comments."""
+    from modules.web.app import configedit
     body = "".join(f"- name: {n}\n  source: /mnt/primary/{n}/\n" for n in jobs)
-    m._save_section("sync_jobs", body)
+    configedit._save_section("sync_jobs", body)
     return config_file.read_text()
 
 
@@ -1437,10 +1438,10 @@ def _comment_precedes(text, note, name):
 
 
 def test_item_comment_survives_an_in_place_save(config_file, monkeypatch):
-    import modules.web.app.main as m
-    monkeypatch.setattr(m, "CONFIG_FILE", config_file)
+    from modules.web.app import core
+    monkeypatch.setattr(core, "CONFIG_FILE", config_file)
     config_file.write_text(CONFIG_WITH_ITEM_COMMENTS)
-    text = _save_jobs(m, config_file, "alpha", "beta", "gamma")
+    text = _save_jobs(config_file, "alpha", "beta", "gamma")
     assert _comment_precedes(text, BETA_NOTE, "beta")
     assert _comment_precedes(text, GAMMA_NOTE, "gamma")
 
@@ -1450,10 +1451,10 @@ def test_item_comment_follows_its_item_when_jobs_are_reordered(config_file, monk
     about beta lives after alpha — so a positional merge would leave it
     introducing whatever ends up second, which is the one outcome #19's
     guardrail rules out."""
-    import modules.web.app.main as m
-    monkeypatch.setattr(m, "CONFIG_FILE", config_file)
+    from modules.web.app import core
+    monkeypatch.setattr(core, "CONFIG_FILE", config_file)
     config_file.write_text(CONFIG_WITH_ITEM_COMMENTS)
-    text = _save_jobs(m, config_file, "gamma", "beta", "alpha")
+    text = _save_jobs(config_file, "gamma", "beta", "alpha")
     assert _comment_precedes(text, GAMMA_NOTE, "gamma")
     assert _comment_precedes(text, BETA_NOTE, "beta")
     # And specifically not reattached to the job that now sits where beta was.
@@ -1461,10 +1462,10 @@ def test_item_comment_follows_its_item_when_jobs_are_reordered(config_file, monk
 
 
 def test_item_comment_survives_an_insertion_above_it(config_file, monkeypatch):
-    import modules.web.app.main as m
-    monkeypatch.setattr(m, "CONFIG_FILE", config_file)
+    from modules.web.app import core
+    monkeypatch.setattr(core, "CONFIG_FILE", config_file)
     config_file.write_text(CONFIG_WITH_ITEM_COMMENTS)
-    text = _save_jobs(m, config_file, "alpha", "inserted", "beta", "gamma")
+    text = _save_jobs(config_file, "alpha", "inserted", "beta", "gamma")
     assert "name: inserted" in text
     assert _comment_precedes(text, BETA_NOTE, "beta")
     # The new job must not inherit the note that belongs to beta.
@@ -1474,20 +1475,20 @@ def test_item_comment_survives_an_insertion_above_it(config_file, monkeypatch):
 def test_removing_a_job_takes_its_comment_and_leaves_the_others(config_file, monkeypatch):
     """Losing the comment of a deleted item is correct — it documented that
     item. What must not happen is it surviving to introduce another one."""
-    import modules.web.app.main as m
-    monkeypatch.setattr(m, "CONFIG_FILE", config_file)
+    from modules.web.app import core
+    monkeypatch.setattr(core, "CONFIG_FILE", config_file)
     config_file.write_text(CONFIG_WITH_ITEM_COMMENTS)
-    text = _save_jobs(m, config_file, "alpha", "gamma")
+    text = _save_jobs(config_file, "alpha", "gamma")
     assert "name: beta" not in text
     assert BETA_NOTE not in text
     assert _comment_precedes(text, GAMMA_NOTE, "gamma")
 
 
 def test_editing_a_field_does_not_disturb_the_comments(config_file, monkeypatch):
-    import modules.web.app.main as m
-    monkeypatch.setattr(m, "CONFIG_FILE", config_file)
+    from modules.web.app import configedit, core
+    monkeypatch.setattr(core, "CONFIG_FILE", config_file)
     config_file.write_text(CONFIG_WITH_ITEM_COMMENTS)
-    m._save_section("sync_jobs",
+    configedit._save_section("sync_jobs",
                     "- name: alpha\n  source: /mnt/primary/alpha/\n"
                     "- name: beta\n  source: /mnt/primary/CHANGED/\n"
                     "- name: gamma\n  source: /mnt/primary/gamma/\n")
@@ -1499,10 +1500,10 @@ def test_editing_a_field_does_not_disturb_the_comments(config_file, monkeypatch)
 
 def test_section_header_rescue_from_10_still_works(config_file, monkeypatch):
     """The two passes run back to back; neither may undo the other."""
-    import modules.web.app.main as m
-    monkeypatch.setattr(m, "CONFIG_FILE", config_file)
+    from modules.web.app import configedit, core
+    monkeypatch.setattr(core, "CONFIG_FILE", config_file)
     config_file.write_text(CONFIG_WITH_SECTION_HEADER)
-    m._save_section("sync_jobs", "- name: data\n  source: /mnt/primary/data/\n")
+    configedit._save_section("sync_jobs", "- name: data\n  source: /mnt/primary/data/\n")
     text = config_file.read_text()
     assert "Checksum integrity manifest" in text
     assert 0 < text.index("Checksum integrity manifest") < text.index("integrity:")
@@ -1513,12 +1514,12 @@ def test_the_repos_own_config_round_trips_byte_identically(monkeypatch, tmp_path
     quietly reformat the real file. Byte-for-byte, or the pass is not safe to
     run on every save."""
     import io
-    import modules.web.app.main as m
+    from modules.web.app import configedit
     src = (REPO_ROOT / "config.yaml").read_text()
-    ry  = m._make_ryaml()
+    ry  = configedit._make_ryaml()
     doc = ry.load(io.StringIO(src))
-    m._reanchor_section_comments(doc)
-    m._reanchor_item_comments(doc)
+    configedit._reanchor_section_comments(doc)
+    configedit._reanchor_item_comments(doc)
     buf = io.StringIO(); ry.dump(doc, buf)
     assert buf.getvalue() == src
 
@@ -1555,40 +1556,40 @@ def test_absent_drive_reports_not_mounted(monkeypatch):
     """The bug: drive_info asked `findmnt --target`, which succeeds against the
     SD card's root mount, so the "not mounted" branch was unreachable and the
     page showed a missing 5.5 TB drive as mounted rw with ~14 GB of capacity."""
-    import modules.web.app.main as m
-    monkeypatch.setattr(m, "_run", _findmnt_fake({"/mnt/backup_daily"}))
-    info = m.drive_info({"mountpoint": "/mnt/primary", "active": True})
+    from modules.web.app import core, system
+    monkeypatch.setattr(core, "_run", _findmnt_fake({"/mnt/backup_daily"}))
+    info = system.drive_info({"mountpoint": "/mnt/primary", "active": True})
     assert info["status"] == "not mounted"
     assert info["usage"] is None
     assert info["mode"] is None
 
 
 def test_present_drive_still_reports_mounted(monkeypatch):
-    import modules.web.app.main as m
-    monkeypatch.setattr(m, "_run", _findmnt_fake({"/mnt/primary"}))
-    info = m.drive_info({"mountpoint": "/mnt/primary", "active": True})
+    from modules.web.app import core, system
+    monkeypatch.setattr(core, "_run", _findmnt_fake({"/mnt/primary"}))
+    info = system.drive_info({"mountpoint": "/mnt/primary", "active": True})
     assert info["status"] == "mounted"
     assert info["mode"] == "rw"
     assert info["usage"] == "3G / 14G (25%)"
 
 
 def test_inactive_drive_is_unchanged(monkeypatch):
-    import modules.web.app.main as m
-    monkeypatch.setattr(m, "_run", _findmnt_fake(set()))
-    assert m.drive_info({"mountpoint": "/mnt/x", "active": False})["status"] == "inactive"
+    from modules.web.app import core, system
+    monkeypatch.setattr(core, "_run", _findmnt_fake(set()))
+    assert system.drive_info({"mountpoint": "/mnt/x", "active": False})["status"] == "inactive"
 
 
 def test_drive_info_never_asks_findmnt_target(monkeypatch):
     """Belt and braces: --target cannot answer "is this mounted", so it must
     not be how the dashboard asks. Pins the fix against a later edit."""
     import subprocess
-    import modules.web.app.main as m
+    from modules.web.app import core, system
     seen = []
     def spy(*args):
         seen.append(list(args))
         return subprocess.CompletedProcess(list(args), 1, "", "")
-    monkeypatch.setattr(m, "_run", spy)
-    m.drive_info({"mountpoint": "/mnt/primary", "active": True})
+    monkeypatch.setattr(core, "_run", spy)
+    system.drive_info({"mountpoint": "/mnt/primary", "active": True})
     findmnt_calls = [a for a in seen if a and a[0] == "findmnt"]
     assert findmnt_calls, "drive_info should consult findmnt"
     assert not any("--target" in a for a in findmnt_calls)
@@ -1659,10 +1660,10 @@ def test_nav_menu_closes_on_escape(client):
 
 @pytest.fixture
 def reports_dir(tmp_path, monkeypatch):
-    import modules.web.app.main as m
+    from modules.web.app import core
     d = tmp_path / "reports"
     d.mkdir()
-    monkeypatch.setattr(m, "REPORTS_DIR", d)
+    monkeypatch.setattr(core, "REPORTS_DIR", d)
     return d
 
 
@@ -1720,9 +1721,9 @@ def test_reports_empty_state_is_explicit(client, auth_headers, reports_dir):
 def test_reports_empty_state_names_the_schedule(client, auth_headers, reports_dir, monkeypatch):
     """When a schedule is configured the empty state says when the first report
     is due, so "nothing here" reads as "not yet" rather than "broken"."""
-    import modules.web.app.main as m
-    base = m.load_config()
-    monkeypatch.setattr(m, "load_config",
+    from modules.web.app import core
+    base = core.load_config()
+    monkeypatch.setattr(core, "load_config",
                         lambda: {**base, "status_report": {"enabled": True,
                                                            "schedule": "Sat *-*-* 03:00:00"}})
     html = client.get("/reports", headers=auth_headers).text
@@ -1730,9 +1731,9 @@ def test_reports_empty_state_names_the_schedule(client, auth_headers, reports_di
 
 
 def test_reports_empty_state_when_disabled(client, auth_headers, reports_dir, monkeypatch):
-    import modules.web.app.main as m
-    base = m.load_config()
-    monkeypatch.setattr(m, "load_config",
+    from modules.web.app import core
+    base = core.load_config()
+    monkeypatch.setattr(core, "load_config",
                         lambda: {**base, "status_report": {"enabled": False, "schedule": "x"}})
     html = client.get("/reports", headers=auth_headers).text
     assert "disabled" in html
@@ -1788,52 +1789,52 @@ def _systemctl_show(units):
 def test_sync_groups_read_the_schedule_from_systemd(monkeypatch):
     """The schedule is stamped into each timer's Description by the shell that
     names the unit, so reading it back cannot drift from the naming."""
-    import modules.web.app.main as m
-    monkeypatch.setattr(m, "_run", _systemctl_show({
+    from modules.web.app import core, system
+    monkeypatch.setattr(core, "_run", _systemctl_show({
         "nase-sync-group-03-00-00.timer": "NASe sync group timer: *-*-* 03:00:00",
         "nase-sync-group-05-30-00.timer": "NASe sync group timer: *-*-* 05:30:00",
     }))
-    assert m.sync_group_units() == {
+    assert system.sync_group_units() == {
         "*-*-* 03:00:00": "nase-sync-group-03-00-00.timer",
         "*-*-* 05:30:00": "nase-sync-group-05-30-00.timer",
     }
 
 
 def test_sync_groups_ignore_unrelated_units(monkeypatch):
-    import modules.web.app.main as m
-    monkeypatch.setattr(m, "_run", _systemctl_show({
+    from modules.web.app import core, system
+    monkeypatch.setattr(core, "_run", _systemctl_show({
         "nase-monitor.timer": "NASe SMART health check",
         "nase-sync-group-03-00-00.timer": "NASe sync group timer: *-*-* 03:00:00",
     }))
-    assert m.sync_group_units() == {"*-*-* 03:00:00": "nase-sync-group-03-00-00.timer"}
+    assert system.sync_group_units() == {"*-*-* 03:00:00": "nase-sync-group-03-00-00.timer"}
 
 
 def test_sync_groups_tolerate_reversed_property_order(monkeypatch):
     """systemctl show does not promise an order for the properties asked for."""
     import subprocess
-    import modules.web.app.main as m
+    from modules.web.app import core, system
     blocks = ("Description=NASe sync group timer: *-*-* 03:00:00\n"
               "Id=nase-sync-group-03-00-00.timer")
-    monkeypatch.setattr(m, "_run",
+    monkeypatch.setattr(core, "_run",
                         lambda *a: subprocess.CompletedProcess(list(a), 0, blocks, ""))
-    assert m.sync_group_units() == {"*-*-* 03:00:00": "nase-sync-group-03-00-00.timer"}
+    assert system.sync_group_units() == {"*-*-* 03:00:00": "nase-sync-group-03-00-00.timer"}
 
 
 def test_sync_groups_empty_when_nothing_installed(monkeypatch):
     import subprocess
-    import modules.web.app.main as m
-    monkeypatch.setattr(m, "_run", lambda *a: subprocess.CompletedProcess(list(a), 1, "", ""))
-    assert m.sync_group_units() == {}
+    from modules.web.app import core, system
+    monkeypatch.setattr(core, "_run", lambda *a: subprocess.CompletedProcess(list(a), 1, "", ""))
+    assert system.sync_group_units() == {}
 
 
 def test_a_job_with_no_group_timer_reads_as_inactive(monkeypatch, config_file):
     """What apply.sh-not-yet-run looks like. The old code computed a unit name
     that did not exist and systemctl answered "inactive"; this must not become
     a crash or a blank now that the name is looked up instead."""
-    import modules.web.app.main as m
-    monkeypatch.setattr(m, "CONFIG_FILE", config_file)
-    monkeypatch.setattr(m, "sync_group_units", lambda: {})
-    timers = m.build_status(m.load_config())["timers"]
+    from modules.web.app import core, system
+    monkeypatch.setattr(core, "CONFIG_FILE", config_file)
+    monkeypatch.setattr(system, "sync_group_units", lambda: {})
+    timers = system.build_status(core.load_config())["timers"]
     jobs = [t for t in timers if t["name"] != "config-archive"]
     assert jobs, "expected the test config to define sync jobs"
     assert all(t["state"] == "inactive" for t in jobs)
@@ -1847,17 +1848,17 @@ def test_spin_history_reader_tolerates_a_new_column():
     exactly, so adding a column to spin_sample.sh without editing main.py made
     every line fall through and blanked the Monitoring tab — a silent, total
     failure for a purely additive change."""
-    import modules.web.app.main as m
+    from modules.web.app import core, system
     from pathlib import Path
     import tempfile
     with tempfile.TemporaryDirectory() as d:
         log = Path(d) / "spin-history.log"
         log.write_text("100\tprimary\tactive\testimated\twoke\t7\tsomething-new\n")
-        orig, m.SPIN_HISTORY_LOG = m.SPIN_HISTORY_LOG, log
+        orig, core.SPIN_HISTORY_LOG = core.SPIN_HISTORY_LOG, log
         try:
-            out = m._read_spin_history()
+            out = system._read_spin_history()
         finally:
-            m.SPIN_HISTORY_LOG = orig
+            core.SPIN_HISTORY_LOG = orig
     assert out["primary"][0][1] == "active"
     assert "7 block requests" in out["primary"][0][2]
 
@@ -1876,10 +1877,10 @@ def test_spin_history_writer_and_reader_agree_on_the_columns():
     assert fmt, "could not find the sample-writing printf in spin_sample.sh"
     written = fmt.group(1).count("%s")
 
-    import modules.web.app.main as m
-    assert written >= len(m._SPIN_FIELDS_REQUIRED), (
+    from modules.web.app import system
+    assert written >= len(system._SPIN_FIELDS_REQUIRED), (
         f"spin_sample.sh writes {written} fields but the reader indexes "
-        f"{len(m._SPIN_FIELDS_REQUIRED)}")
+        f"{len(system._SPIN_FIELDS_REQUIRED)}")
 
     # And the documented order in the sampler's header is the order the reader
     # relies on, so a reordering there is caught here rather than by a wrong
@@ -1895,9 +1896,9 @@ def test_spin_history_writer_and_reader_agree_on_the_columns():
 
 @pytest.fixture
 def events_log(tmp_path, monkeypatch):
-    import modules.web.app.main as m
+    from modules.web.app import core
     log = tmp_path / "primary-events.log"
-    monkeypatch.setattr(m, "EVENTS_LOG", log)
+    monkeypatch.setattr(core, "EVENTS_LOG", log)
     return log
 
 
@@ -1914,23 +1915,23 @@ def test_heartbeats_are_not_listed_as_file_changes(events_log):
     """The reported bug: 288 heartbeats shown as one changed file called "-"
     in a share called "(root)". They carry "-" as their path, so the
     path-based exclude never saw them."""
-    import modules.web.app.main as m
+    from modules.web.app import changes
     _events(events_log, [(m_, "__heartbeat__", "-") for m_ in range(1, 30)])
-    out = m.build_changes("day")
+    out = changes.build_changes("day")
     assert out["rows"] == []
     assert out["total"] == 0
 
 
 def test_watcher_restart_gaps_are_not_file_changes(events_log):
-    import modules.web.app.main as m
+    from modules.web.app import changes
     _events(events_log, [(5, "__gap__", "-")])
-    assert m.build_changes("day")["rows"] == []
+    assert changes.build_changes("day")["rows"] == []
 
 
 def test_real_changes_still_appear_alongside_bookkeeping(events_log):
     """The filter must remove only the bookkeeping, not the activity around
     it — the heartbeats are interleaved with genuine events in the real log."""
-    import modules.web.app.main as m
+    from modules.web.app import changes
     _events(events_log, [
         (10, "__heartbeat__", "-"),
         (9,  "create", "/mnt/primary/photo/holiday.jpg"),
@@ -1938,7 +1939,7 @@ def test_real_changes_still_appear_alongside_bookkeeping(events_log):
         (7,  "modify", "/mnt/primary/music/track.flac"),
         (6,  "__gap__", "watcher started"),
     ])
-    items = m.build_changes("day")["rows"]
+    items = changes.build_changes("day")["rows"]
     assert {i["rel"] for i in items} == {"holiday.jpg", "track.flac"}
     assert {i["share"] for i in items} == {"photo", "music"}
     assert all(i["op"] in ("create", "modify") for i in items)
@@ -1946,11 +1947,11 @@ def test_real_changes_still_appear_alongside_bookkeeping(events_log):
 
 def test_manifest_and_trash_paths_are_still_excluded(events_log):
     """The pre-existing path-based exclude must survive the new op filter."""
-    import modules.web.app.main as m
+    from modules.web.app import changes
     _events(events_log, [
         (5, "modify", "/mnt/primary/.nase/integrity.db"),
         (4, "create", "/mnt/backup_daily/.trash/2026-01-01/old.txt"),
         (3, "create", "/mnt/primary/video/real.mkv"),
     ])
-    items = m.build_changes("day")["rows"]
+    items = changes.build_changes("day")["rows"]
     assert [i["rel"] for i in items] == ["real.mkv"]

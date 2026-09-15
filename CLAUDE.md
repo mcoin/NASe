@@ -68,8 +68,25 @@ tests/    run-tests.sh runs every suite; --ui is not wired up yet
 config/   logrotate, journald (persistent), DefaultTimeoutStopSec drop-ins
 ```
 
-`modules/web/app/main.py` is the FastAPI app (status, changes, integrity,
-monitoring, reports, backlog, config editor, `/apply` SSE stream).
+`modules/web/app/` is the FastAPI app, split by feature so one area can be
+read without the other 1,900 lines:
+
+| file | holds |
+|------|-------|
+| `core.py` | paths, auth, `templates`, `load_config`, `_run`, `protected_router()` |
+| `main.py` | the `app`, error pages, page routes, config routes, `/apply` SSE |
+| `system.py` | systemd units, drive/spin state, monitoring timeline, log tail |
+| `changes.py` | the file-activity feed and the integrity summary |
+| `backlog.py` | backlog data layer, attachments, every `/backlog` route |
+| `reports.py` | archived status reports |
+| `configedit.py` | `unwrap_prose` and the comment-preserving `config.yaml` save |
+
+**Never `from core import X` — always `core.X`, read at call time.** The tests
+monkeypatch `core.CONFIG_FILE`, `core._run` and friends; a `from` import binds
+the original value at import time, so the tests would stay green while the code
+read the real path. The service is started as `uvicorn modules.web.app.main:app`
+with `WorkingDirectory=<repo>` for the same reason the tests use
+`modules.web.app.main`: the package has to be imported one way, not two.
 
 ## apply.sh order
 

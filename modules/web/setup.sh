@@ -53,8 +53,8 @@ After=network.target
 Type=simple
 Environment=REPO_ROOT=${REPO_ROOT}
 EnvironmentFile=-${REPO_ROOT}/.env
-ExecStart=${VENV_DIR}/bin/uvicorn main:app --host 0.0.0.0 --port ${port}
-WorkingDirectory=${APP_DIR}
+ExecStart=${VENV_DIR}/bin/uvicorn modules.web.app.main:app --host 0.0.0.0 --port ${port}
+WorkingDirectory=${REPO_ROOT}
 Restart=on-failure
 RestartSec=5s
 
@@ -71,7 +71,7 @@ fi
 # Restart only when the app code or requirements changed.
 STAMP_DIR="/var/lib/nase"
 mkdir -p "$STAMP_DIR"
-app_hash=$(find "${WEB_DIR}/app" "${WEB_DIR}/requirements.txt" -type f | sort \
+app_hash=$(find "${APP_DIR}" "${WEB_DIR}/requirements.txt" -type f | sort \
            | xargs sha256sum 2>/dev/null | sha256sum | cut -d' ' -f1)
 hash_stamp="${STAMP_DIR}/web-app.hash"
 if [[ ! -f "$hash_stamp" ]] || [[ "$(cat "$hash_stamp")" != "$app_hash" ]]; then
