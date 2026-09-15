@@ -10,8 +10,10 @@ source "${REPO_ROOT}/lib/config.sh"
 
 log_section "Status report"
 
-enabled=$(config_get '.status_report.enabled // "true"')
-if [[ "$enabled" != "true" ]]; then
+# Explicitly false means off; anything else, including absent, means on.
+# Not `// "true"`: that operator cannot tell false from missing (see config_get).
+enabled=$(config_get '.status_report.enabled')
+if [[ "$enabled" == "false" ]]; then
     log_info "Status report disabled — skipping."
     exit 0
 fi

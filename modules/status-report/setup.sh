@@ -13,10 +13,12 @@ SYSTEMD_DIR="${SYSTEMD_DIR:-/etc/systemd/system}"
 REPORT_SCRIPT="${REPO_ROOT}/modules/status-report/report.sh"
 UNIT_BASE="nase-status-report"
 
-enabled=$(config_get '.status_report.enabled // "true"')
+# Explicitly false means off; anything else, including absent, means on.
+# Not `// "true"`: that operator cannot tell false from missing (see config_get).
+enabled=$(config_get '.status_report.enabled')
 schedule=$(config_get '.status_report.schedule // "Sat *-*-* 03:00:00"')
 
-if [[ "$enabled" != "true" ]]; then
+if [[ "$enabled" == "false" ]]; then
     if systemctl is-enabled --quiet "${UNIT_BASE}.timer" 2>/dev/null; then
         log_info "Status report disabled — stopping and disabling timer..."
         systemctl disable --now "${UNIT_BASE}.timer" 2>/dev/null || true

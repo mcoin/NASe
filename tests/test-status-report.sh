@@ -263,4 +263,51 @@ chmod +x "$RR/modules/sync/notify.sh"
 assert_eq "no .tmp files left in the reports directory" "0" \
     "$(ls -1 "$REPORTS"/*.tmp 2>/dev/null | wc -l)"
 
+# ── status_report.enabled: false actually disables the report (#40) ───────────
+# It did not: the guard read `.status_report.enabled // "true"`, and `//` yields
+# its default for a false as well as for an absent key, so a configured false
+# came back as "true" and the report kept composing, archiving and mailing. Both
+# directions are asserted, because inverting the broken condition would pass the
+# negative case alone.
+set_enabled() {
+    python3 - "$RR/config.yaml" "$1" <<'EOF'
+import re, sys
+p, val = sys.argv[1], sys.argv[2]
+s = open(p).read()
+s, n = re.subn(r"(status_report:\n  enabled: )\w+", r"\g<1>" + val, s)
+assert n == 1, "status_report.enabled not found in the test config"
+open(p, "w").write(s)
+EOF
+}
+
+rm -rf "$REPORTS"
+rm -f "${STAMPS}/status-report.stamp"
+set_enabled false
+REPORT_OFF=$(run_report)
+assert_contains "a configured false is honoured"     "Status report disabled" "$REPORT_OFF"
+assert_not_contains "no report body is composed when disabled"     "=== SYSTEM STATUS ===" "$REPORT_OFF"
+assert_eq "and nothing is archived when disabled" "0" \
+    "$(ls -1 "$REPORTS"/*.json 2>/dev/null | wc -l)"
+
+set_enabled true
+REPORT_ON=$(run_report)
+assert_contains "a configured true still runs" \
+    "=== SYSTEM STATUS ===" "$REPORT_ON"
+assert_eq "and still archives" "1" \
+    "$(ls -1 "$REPORTS"/*.json 2>/dev/null | wc -l)"
+
+# Absent means enabled: the dropped `// "true"` default was expressing that, and
+# it has to survive without the operator that could not tell false from missing.
+rm -rf "$REPORTS"
+rm -f "${STAMPS}/status-report.stamp"
+python3 - "$RR/config.yaml" <<'EOF'
+import re, sys
+p = sys.argv[1]
+s = open(p).read()
+open(p, "w").write(re.sub(r"status_report:\n  enabled: \w+\n", "", s))
+EOF
+REPORT_ABSENT=$(run_report)
+assert_contains "an absent status_report.enabled means enabled" \
+    "=== SYSTEM STATUS ===" "$REPORT_ABSENT"
+
 test_summary

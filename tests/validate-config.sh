@@ -204,7 +204,7 @@ if [[ "$method" != "email" && "$method" != "webhook" && "$method" != "none" && -
 fi
 
 # ── status_report section ────────────────────────────────────────────────────
-sr_enabled=$(config_get '.status_report.enabled // "true"')
+sr_enabled=$(config_get '.status_report.enabled')
 sr_schedule=$(config_get '.status_report.schedule // ""')
 
 if [[ -n "$sr_enabled" && "$sr_enabled" != "true" && "$sr_enabled" != "false" ]]; then

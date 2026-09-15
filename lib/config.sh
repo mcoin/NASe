@@ -70,6 +70,16 @@ _config_path() {
 # Supports the two forms the codebase actually uses: a dotted path, optionally
 # with [N] indices, and an optional `// default` suffix. Anything more
 # elaborate would need yq and is not used anywhere.
+#
+# The default applies when the key is absent or null — and only then. This is
+# deliberately *not* yq's `//`, which also falls back on a literal false, so
+# `.x.enabled // "true"` there reads a configured `false` as "true" (#40).
+#
+# For a boolean, reach for one of:
+#   config_bool '.x.enabled'                 — absent means off
+#   [[ $(config_get '.x.enabled') == false ]] — absent means on
+# Never give a boolean a `// default`; the default it needs is in the choice
+# of idiom above, not in the expression.
 config_get() {
     local expr="$1" default="" has_default=false path val
     if [[ "$expr" == *" // "* ]]; then
@@ -102,14 +112,6 @@ config_get() {
         echo ""
         return 0
     fi
-    # `a // b` in yq yields b when a is null *or false*, not merely absent.
-    # Reproduced rather than corrected: this is a behaviour-preserving change,
-    # and the one place it bites (a boolean with a `// "true"` default) is
-    # tracked separately.
-    if $has_default && [[ "$val" == "false" ]]; then
-        printf '%s\n' "$default"
-        return 0
-    fi
     printf '%s\n' "$val"
 }
 
@@ -136,7 +138,9 @@ config_len() {
 }
 
 # config_bool <yq-expression>
-# Exit 0 if the boolean is true, exit 1 otherwise.
+# Exit 0 if the boolean is true, exit 1 otherwise — so an absent key is false.
+# When absent should mean *enabled*, test config_get against "false" instead;
+# see the note on config_get.
 config_bool() {
     local val
     val=$(config_get "$1")

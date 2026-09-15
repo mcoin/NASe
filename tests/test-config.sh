@@ -115,9 +115,10 @@ assert_exit1 "config_bool: absent key"  config_bool '.does.not.exist'
 # The whole file is parsed once by a single `yq -o=props` and the accessors are
 # string lookups after that. These pin the properties that make the swap safe.
 
-# Defaults. yq's `a // b` yields b when a is null *or false* — not merely when
-# absent — and that is reproduced rather than corrected, because this was a
-# behaviour-preserving change. The one place it bites is tracked separately.
+# Defaults. Unlike yq's `a // b`, which yields b when a is null *or false*, the
+# default here applies only when the key is absent or null — a configured false
+# reads as false (#40), so a boolean can never be silently flipped to its
+# default.
 assert_eq "default used for an absent key" "fallback" \
     "$(config_get '.does.not.exist // "fallback"')"
 assert_eq "default not used when a value is present" "testhost" \
@@ -126,9 +127,9 @@ assert_eq "an unquoted numeric default works" "10" \
     "$(config_get '.does.not.exist // 10')"
 assert_eq "a default containing spaces survives" "Sat *-*-* 03:00:00" \
     "$(config_get '.does.not.exist // "Sat *-*-* 03:00:00"')"
-assert_eq "yq semantics: false falls back to the default" "true" \
+assert_eq "a configured false does not fall back to the default" "false" \
     "$(config_get '.services.filebrowser.enabled // "true"')"
-assert_eq "but without a default, false is false" "false" \
+assert_eq "and false is false without a default too" "false" \
     "$(config_get '.services.filebrowser.enabled')"
 
 # Values that a naive "key = value" split would mangle.
